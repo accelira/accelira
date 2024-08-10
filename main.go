@@ -5,18 +5,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/fatih/color"
-	"gonum.org/v1/gonum/stat"
-)
-
-const (
-	rollingWindowSize = 1000 // Adjust size based on memory constraints and accuracy needs
+	"github.com/influxdata/tdigest"
 )
 
 type EndpointMetrics struct {
@@ -29,7 +24,7 @@ type EndpointMetrics struct {
 	TotalBytesSent     int
 	StatusCodeCounts   map[int]int
 	Errors             int
-	ResponseTimes      []float64
+	ResponseTimes      *tdigest.TDigest
 }
 
 type Metrics struct {
@@ -68,7 +63,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 			URL:              url,
 			Method:           method,
 			StatusCodeCounts: make(map[int]int),
-			ResponseTimes:    []float64{},
+			ResponseTimes:    tdigest.New(),
 		}
 	}
 
@@ -79,10 +74,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 	epMetrics.TotalBytesReceived += len(responseBody)
 	epMetrics.TotalBytesSent += len(req.URL.String())
 	epMetrics.StatusCodeCounts[resp.StatusCode]++
-	if len(epMetrics.ResponseTimes) >= rollingWindowSize {
-		epMetrics.ResponseTimes = epMetrics.ResponseTimes[1:] // Remove oldest value
-	}
-	epMetrics.ResponseTimes = append(epMetrics.ResponseTimes, duration.Seconds()*1000) // Convert to milliseconds
+	epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
 
 	if err != nil {
 		epMetrics.Errors++
@@ -153,7 +145,7 @@ func generateReport(metricsList []Metrics) {
 			if _, exists := aggregatedMetrics[key]; !exists {
 				aggregatedMetrics[key] = &EndpointMetrics{
 					StatusCodeCounts: make(map[int]int),
-					ResponseTimes:    []float64{},
+					ResponseTimes:    tdigest.New(),
 				}
 			}
 			aggMetrics := aggregatedMetrics[key]
@@ -164,7 +156,11 @@ func generateReport(metricsList []Metrics) {
 			aggMetrics.TotalBytesSent += epMetrics.TotalBytesSent
 			aggMetrics.Errors += epMetrics.Errors
 
-			aggMetrics.ResponseTimes = append(aggMetrics.ResponseTimes, epMetrics.ResponseTimes...)
+			// Merge response times
+			aggMetrics.ResponseTimes.Add(epMetrics.ResponseTimes.Quantile(0.5), 1)
+			for i := 0; i < int(epMetrics.ResponseTimes.Count()); i++ {
+				aggMetrics.ResponseTimes.Add(epMetrics.ResponseTimes.Quantile(0.5), 1)
+			}
 
 			for code, count := range epMetrics.StatusCodeCounts {
 				aggMetrics.StatusCodeCounts[code] += count
@@ -176,21 +172,12 @@ func generateReport(metricsList []Metrics) {
 	fmt.Println()
 
 	for key, epMetrics := range aggregatedMetrics {
-		if len(epMetrics.ResponseTimes) == 0 {
-			continue // Skip if no response times are recorded
-		}
-		sort.Float64s(epMetrics.ResponseTimes)
-		median := stat.Quantile(0.5, stat.Empirical, epMetrics.ResponseTimes, nil)
-		percentile90 := stat.Quantile(0.9, stat.Empirical, epMetrics.ResponseTimes, nil)
-
 		color.Blue("Endpoint: %s", key)
 		fmt.Printf("  Total Requests       : %d\n", epMetrics.Requests)
 		fmt.Printf("  Total Duration       : %v\n", epMetrics.TotalDuration)
 		fmt.Printf("  Average Response Time: %v\n", epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests))
-		fmt.Printf("  Min Response Time    : %v\n", epMetrics.ResponseTimes[0])
-		fmt.Printf("  Max Response Time    : %v\n", epMetrics.ResponseTimes[len(epMetrics.ResponseTimes)-1])
-		fmt.Printf("  50th Percentile      : %v\n", median)
-		fmt.Printf("  90th Percentile      : %v\n", percentile90)
+		fmt.Printf("  50th Percentile      : %v\n", epMetrics.ResponseTimes.Quantile(0.50))
+		fmt.Printf("  90th Percentile      : %v\n", epMetrics.ResponseTimes.Quantile(0.90))
 		fmt.Printf("  Total Bytes Received : %d\n", epMetrics.TotalBytesReceived)
 		fmt.Printf("  Total Bytes Sent     : %d\n", epMetrics.TotalBytesSent)
 		fmt.Printf("  Errors               : %d\n", epMetrics.Errors)
