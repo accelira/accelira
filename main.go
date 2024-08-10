@@ -9,8 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"sort"
+
 	"github.com/dop251/goja"
 	"github.com/fatih/color"
+	"gonum.org/v1/gonum/stat"
 )
 
 type EndpointMetrics struct {
@@ -23,6 +26,7 @@ type EndpointMetrics struct {
 	TotalBytesSent     int
 	StatusCodeCounts   map[int]int
 	Errors             int
+	ResponseTimes      []time.Duration // Added for percentile calculations
 }
 
 type Metrics struct {
@@ -61,6 +65,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 			URL:              url,
 			Method:           method,
 			StatusCodeCounts: make(map[int]int),
+			ResponseTimes:    []time.Duration{},
 		}
 	}
 
@@ -71,6 +76,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 	epMetrics.TotalBytesReceived += len(responseBody)
 	epMetrics.TotalBytesSent += len(req.URL.String())
 	epMetrics.StatusCodeCounts[resp.StatusCode]++
+	epMetrics.ResponseTimes = append(epMetrics.ResponseTimes, duration) // Record the response time
 	if err != nil {
 		epMetrics.Errors++
 	}
@@ -141,6 +147,7 @@ func generateReport(metricsList []Metrics) {
 			if _, exists := aggregatedMetrics[key]; !exists {
 				aggregatedMetrics[key] = &EndpointMetrics{
 					StatusCodeCounts: make(map[int]int),
+					ResponseTimes:    []time.Duration{},
 				}
 			}
 			aggMetrics := aggregatedMetrics[key]
@@ -150,6 +157,7 @@ func generateReport(metricsList []Metrics) {
 			aggMetrics.TotalBytesReceived += epMetrics.TotalBytesReceived
 			aggMetrics.TotalBytesSent += epMetrics.TotalBytesSent
 			aggMetrics.Errors += epMetrics.Errors
+			aggMetrics.ResponseTimes = append(aggMetrics.ResponseTimes, epMetrics.ResponseTimes...)
 
 			for code, count := range epMetrics.StatusCodeCounts {
 				aggMetrics.StatusCodeCounts[code] += count
@@ -168,6 +176,26 @@ func generateReport(metricsList []Metrics) {
 		fmt.Printf("  Total Bytes Received : %d\n", epMetrics.TotalBytesReceived)
 		fmt.Printf("  Total Bytes Sent     : %d\n", epMetrics.TotalBytesSent)
 		fmt.Printf("  Errors               : %d\n", epMetrics.Errors)
+
+		// Calculate percentiles
+		if len(epMetrics.ResponseTimes) > 0 {
+			responseTimes := make([]float64, len(epMetrics.ResponseTimes))
+			for i, t := range epMetrics.ResponseTimes {
+				responseTimes[i] = float64(t.Milliseconds())
+			}
+			// Sort the response times
+			sort.Float64s(responseTimes)
+
+			p50 := stat.Quantile(0.50, stat.Empirical, responseTimes, nil)
+			p90 := stat.Quantile(0.90, stat.Empirical, responseTimes, nil)
+			p95 := stat.Quantile(0.95, stat.Empirical, responseTimes, nil)
+			p99 := stat.Quantile(0.99, stat.Empirical, responseTimes, nil)
+
+			fmt.Printf("  50th Percentile Response Time: %.2f ms\n", p50)
+			fmt.Printf("  90th Percentile Response Time: %.2f ms\n", p90)
+			fmt.Printf("  95th Percentile Response Time: %.2f ms\n", p95)
+			fmt.Printf("  99th Percentile Response Time: %.2f ms\n", p99)
+		}
 		fmt.Println()
 		color.Green("  Status Code Counts:")
 		for code, count := range epMetrics.StatusCodeCounts {
