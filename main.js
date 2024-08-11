@@ -1,16 +1,53 @@
-function main() {
+const http = require('http');
+const assert = require('assert');
+
+async function performHttpRequest(url, method, body = null) {
+    let response;
+    try {
+        switch (method) {
+            case 'GET':
+                response = await http.get(url);
+                break;
+            case 'POST':
+                response = await http.post(url, body);
+                break;
+            case 'PUT':
+                response = await http.put(url, body);
+                break;
+            case 'DELETE':
+                response = await http.delete(url);
+                break;
+            default:
+                throw new Error('Invalid HTTP method');
+        }
+        return response;
+    } catch (error) {
+        console.error(`Error in ${method} request to ${url}:`, error);
+    }
+}
+
+async function main() {
     console.log("Starting script execution...");
-    var getResponse = http.get("https://jsonplaceholder.typicode.com/todos/1");
+
+    const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
+    const postUrl = "https://jsonplaceholder.typicode.com/posts";
+    const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
+    const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
+
+    const getResponse = await performHttpRequest(getUrl, 'GET');
     console.log("GET Response:", getResponse);
-    
-    var postResponse = http.post("https://jsonplaceholder.typicode.com/posts", JSON.stringify({title: "foo", body: "bar", userId: 1}));
+
+    const postResponse = await performHttpRequest(postUrl, 'POST', JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
     console.log("POST Response:", postResponse);
-    
-    var putResponse = http.put("https://jsonplaceholder.typicode.com/posts/1", JSON.stringify({id: 1, title: "foo", body: "bar", userId: 1}));
+
+    const putResponse = await performHttpRequest(putUrl, 'PUT', JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
     console.log("PUT Response:", putResponse);
-    
-    var deleteResponse = http.delete("https://jsonplaceholder.typicode.com/posts/1");
+
+    const deleteResponse = await performHttpRequest(deleteUrl, 'DELETE');
     console.log("DELETE Response:", deleteResponse);
+
+    // Example assertion
+    assert.equal(getResponse.includes('userId'), true);
 }
 
 main();

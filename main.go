@@ -88,49 +88,57 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 func runScript(script string, iterations int, metricsChan chan<- Metrics, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	vm := goja.New()
-
-	// Define a basic console object
-	vm.Set("console", map[string]interface{}{
-		"log": func(args ...interface{}) {
-			for _, arg := range args {
-				fmt.Println(arg)
-			}
-		},
-	})
-
-	vm.Set("http", map[string]interface{}{
-		"get": func(url string) (string, error) {
-			response, err := httpRequest(url, "GET", nil, metricsChan)
-			if err != nil {
-				return fmt.Sprintf("Error: %s", err), nil
-			}
-			return response, nil
-		},
-		"post": func(url string, body string) (string, error) {
-			response, err := httpRequest(url, "POST", strings.NewReader(body), metricsChan)
-			if err != nil {
-				return fmt.Sprintf("Error: %s", err), nil
-			}
-			return response, nil
-		},
-		"put": func(url string, body string) (string, error) {
-			response, err := httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
-			if err != nil {
-				return fmt.Sprintf("Error: %s", err), nil
-			}
-			return response, nil
-		},
-		"delete": func(url string) (string, error) {
-			response, err := httpRequest(url, "DELETE", nil, metricsChan)
-			if err != nil {
-				return fmt.Sprintf("Error: %s", err), nil
-			}
-			return response, nil
-		},
-	})
-
 	for i := 0; i < iterations; i++ {
+		vm := goja.New()
+
+		// Define console object
+		vm.Set("console", map[string]interface{}{
+			"log": func(args ...interface{}) {
+				for _, arg := range args {
+					fmt.Println(arg)
+				}
+			},
+		})
+
+		// Define modules in a fresh context
+		modules := map[string]map[string]interface{}{
+			"http": {
+				"get": func(url string) (string, error) {
+					return httpRequest(url, "GET", nil, metricsChan)
+				},
+				"post": func(url string, body string) (string, error) {
+					return httpRequest(url, "POST", strings.NewReader(body), metricsChan)
+				},
+				"put": func(url string, body string) (string, error) {
+					return httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+				},
+				"delete": func(url string) (string, error) {
+					return httpRequest(url, "DELETE", nil, metricsChan)
+				},
+			},
+			"assert": {
+				"equal": func(expected, actual interface{}) {
+					if expected != actual {
+						panic(fmt.Sprintf("Assertion failed: expected %v, got %v", expected, actual))
+					}
+				},
+				"notEqual": func(expected, actual interface{}) {
+					if expected == actual {
+						panic(fmt.Sprintf("Assertion failed: expected something different from %v, got %v", expected, actual))
+					}
+				},
+			},
+		}
+
+		// Define require function
+		vm.Set("require", func(moduleName string) interface{} {
+			if module, ok := modules[moduleName]; ok {
+				return module
+			}
+			return nil
+		})
+
+		// Load and run the script in a fresh context
 		_, err := vm.RunScript("script.js", script)
 		if err != nil {
 			fmt.Println("Script Error:", err)
