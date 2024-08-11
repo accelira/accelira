@@ -1,5 +1,16 @@
 const http = require('http');
 const assert = require('assert');
+const config = require('config'); // Import the config module
+
+// Set configuration values
+config.setIterations(10); // Example: Set iterations to 20
+config.setRampUpRate(3); // Example: Set ramp-up rate to 3 users per second
+config.setConcurrentUsers(20); // Example: Set concurrent users to 10
+
+// Retrieve configuration values
+const iterations = config.getIterations();
+const rampUpRate = config.getRampUpRate();
+const concurrentUsers = config.getConcurrentUsers();
 
 async function performHttpRequest(url, method, body = null) {
     let response;
@@ -28,12 +39,14 @@ async function performHttpRequest(url, method, body = null) {
 
 async function main() {
     console.log("Starting script execution...");
+    console.log(`Config - Iterations: ${iterations}, Ramp-Up Rate: ${rampUpRate} users/sec, Concurrent Users: ${concurrentUsers}`);
 
     const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
     const postUrl = "https://jsonplaceholder.typicode.com/posts";
     const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
     const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
 
+    // Perform HTTP requests
     const getResponse = await performHttpRequest(getUrl, 'GET');
     console.log("GET Response:", getResponse);
 

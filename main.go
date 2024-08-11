@@ -36,22 +36,34 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
+		select {
+		case metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}:
+		default:
+			fmt.Println("Channel is full, dropping metrics")
+		}
 		return "", err
 	}
 
-	req.Header.Set("User-Agent", "CustomTool/1.0")
+	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
+		select {
+		case metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}:
+		default:
+			fmt.Println("Channel is full, dropping metrics")
+		}
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
+		select {
+		case metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}:
+		default:
+			fmt.Println("Channel is full, dropping metrics")
+		}
 		return "", err
 	}
 
@@ -76,72 +88,103 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 	epMetrics.StatusCodeCounts[resp.StatusCode]++
 	epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
 
-	if err != nil {
-		epMetrics.Errors++
+	select {
+	case metricsChan <- metrics:
+	default:
+		fmt.Println("Channel is full, dropping metrics")
 	}
-
-	metricsChan <- metrics
 
 	return string(responseBody), nil
 }
 
-func runScript(script string, iterations int, metricsChan chan<- Metrics, wg *sync.WaitGroup) {
+type Config struct {
+	iterations      int
+	rampUpRate      int // Users per second
+	concurrentUsers int
+}
+
+func createConfigModule(config *Config) map[string]interface{} {
+	return map[string]interface{}{
+		"setIterations": func(iterations int) {
+			config.iterations = iterations
+		},
+		"setRampUpRate": func(rate int) {
+			config.rampUpRate = rate
+		},
+		"setConcurrentUsers": func(users int) {
+			config.concurrentUsers = users
+		},
+		"getIterations": func() int {
+			return config.iterations
+		},
+		"getRampUpRate": func() int {
+			return config.rampUpRate
+		},
+		"getConcurrentUsers": func() int {
+			return config.concurrentUsers
+		},
+	}
+}
+
+func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, config *Config) {
 	defer wg.Done()
 
-	for i := 0; i < iterations; i++ {
-		vm := goja.New()
+	vm := goja.New()
+	configModule := createConfigModule(config)
 
-		// Define console object
-		vm.Set("console", map[string]interface{}{
-			"log": func(args ...interface{}) {
-				for _, arg := range args {
-					fmt.Println(arg)
+	vm.Set("console", map[string]interface{}{
+		"log": func(args ...interface{}) {
+			for _, arg := range args {
+				fmt.Println(arg)
+			}
+		},
+	})
+
+	modules := map[string]map[string]interface{}{
+		"http": {
+			"get": func(url string) (string, error) {
+				return httpRequest(url, "GET", nil, metricsChan)
+			},
+			"post": func(url string, body string) (string, error) {
+				return httpRequest(url, "POST", strings.NewReader(body), metricsChan)
+			},
+			"put": func(url string, body string) (string, error) {
+				return httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+			},
+			"delete": func(url string) (string, error) {
+				return httpRequest(url, "DELETE", nil, metricsChan)
+			},
+		},
+		"assert": {
+			"equal": func(expected, actual interface{}) {
+				if expected != actual {
+					panic(fmt.Sprintf("Assertion failed: expected %v, got %v", expected, actual))
 				}
 			},
-		})
+			"notEqual": func(expected, actual interface{}) {
+				if expected == actual {
+					panic(fmt.Sprintf("Assertion failed: expected something different from %v, got %v", expected, actual))
+				}
+			},
+		},
+		"config": configModule,
+	}
 
-		// Define modules in a fresh context
-		modules := map[string]map[string]interface{}{
-			"http": {
-				"get": func(url string) (string, error) {
-					return httpRequest(url, "GET", nil, metricsChan)
-				},
-				"post": func(url string, body string) (string, error) {
-					return httpRequest(url, "POST", strings.NewReader(body), metricsChan)
-				},
-				"put": func(url string, body string) (string, error) {
-					return httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
-				},
-				"delete": func(url string) (string, error) {
-					return httpRequest(url, "DELETE", nil, metricsChan)
-				},
-			},
-			"assert": {
-				"equal": func(expected, actual interface{}) {
-					if expected != actual {
-						panic(fmt.Sprintf("Assertion failed: expected %v, got %v", expected, actual))
-					}
-				},
-				"notEqual": func(expected, actual interface{}) {
-					if expected == actual {
-						panic(fmt.Sprintf("Assertion failed: expected something different from %v, got %v", expected, actual))
-					}
-				},
-			},
+	vm.Set("require", func(moduleName string) interface{} {
+		if module, ok := modules[moduleName]; ok {
+			return module
 		}
+		return nil
+	})
 
-		// Define require function
-		vm.Set("require", func(moduleName string) interface{} {
-			if module, ok := modules[moduleName]; ok {
-				return module
-			}
-			return nil
-		})
+	iterations := modules["config"]["getIterations"].(func() int)()
 
-		// Load and run the script in a fresh context
-		_, err := vm.RunScript("script.js", script)
+	for i := 0; i < iterations; i++ {
+		wrappedScript := fmt.Sprintf("(function() { %s })();", script)
+
+		_, err := vm.RunScript("script.js", wrappedScript)
 		if err != nil {
-			fmt.Println("Script Error:", err)
+			fmt.Println("Error running script:", err)
 		}
 	}
 }
@@ -164,7 +207,6 @@ func generateReport(metricsList []Metrics) {
 			aggMetrics.TotalBytesSent += epMetrics.TotalBytesSent
 			aggMetrics.Errors += epMetrics.Errors
 
-			// Merge response times
 			aggMetrics.ResponseTimes.Add(epMetrics.ResponseTimes.Quantile(0.5), 1)
 			for i := 0; i < int(epMetrics.ResponseTimes.Count()); i++ {
 				aggMetrics.ResponseTimes.Add(epMetrics.ResponseTimes.Quantile(0.5), 1)
@@ -206,33 +248,74 @@ func main() {
 		return
 	}
 
-	scriptPath := os.Args[1] // Get the script file path from the command line argument
+	scriptPath := os.Args[1]
 
-	iterations := 10
-	concurrentWorkers := 5
-
-	// Read the script file once
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
 		fmt.Println("Error reading script file:", err)
 		return
 	}
 
-	metricsChan := make(chan Metrics, iterations*concurrentWorkers)
+	metricsChan := make(chan Metrics, 10000)
+
 	var wg sync.WaitGroup
-	for i := 0; i < concurrentWorkers; i++ {
-		wg.Add(1)
-		go runScript(string(script), iterations, metricsChan, &wg)
-	}
+	var metricsList []Metrics
+	var metricsMutex sync.Mutex
+
+	metricsWaitGroup := sync.WaitGroup{}
+	metricsWaitGroup.Add(1)
+
 	go func() {
-		wg.Wait()
-		close(metricsChan)
+		for metrics := range metricsChan {
+			metricsMutex.Lock()
+			metricsList = append(metricsList, metrics)
+			metricsMutex.Unlock()
+		}
+		metricsWaitGroup.Done()
 	}()
 
-	var metricsList []Metrics
-	for metrics := range metricsChan {
-		metricsList = append(metricsList, metrics)
+	config := &Config{
+		iterations:      10,
+		rampUpRate:      1, // Default to 1 user per second
+		concurrentUsers: 5,
 	}
 
+	vm := goja.New()
+	configModule := createConfigModule(config)
+
+	vm.Set("require", func(moduleName string) interface{} {
+		if moduleName == "config" {
+			return configModule
+		}
+		return nil
+	})
+
+	_, err = vm.RunScript("script.js", string(script))
+	if err != nil {
+		fmt.Println("Error running script:", err)
+		return
+	}
+
+	concurrentUsers := configModule["getConcurrentUsers"].(func() int)()
+	rampUpRate := configModule["getRampUpRate"].(func() int)()
+
+	for i := 0; i < concurrentUsers; i++ {
+		wg.Add(1)
+		go runScript(string(script), metricsChan, &wg, config)
+
+		if rampUpRate > 0 && i < concurrentUsers-1 {
+			sleepDuration := time.Second / time.Duration(rampUpRate)
+			time.Sleep(sleepDuration)
+		}
+
+	}
+
+	wg.Wait()
+	close(metricsChan)
+
+	metricsWaitGroup.Wait()
+
+	metricsMutex.Lock()
 	generateReport(metricsList)
+	metricsMutex.Unlock()
 }
