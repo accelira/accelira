@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cheynewallace/tabby"
 	"github.com/dop251/goja"
 	"github.com/fatih/color"
 	"github.com/influxdata/tdigest"
@@ -218,26 +219,45 @@ func generateReport(metricsList []Metrics) {
 		}
 	}
 
-	color.Cyan("=== Performance Test Report by Endpoint and Method ===")
+	color.Cyan("=== Performance Test Report ===")
 	fmt.Println()
 
-	for key, epMetrics := range aggregatedMetrics {
-		color.Blue("Endpoint: %s", key)
-		fmt.Printf("  Total Requests       : %d\n", epMetrics.Requests)
-		fmt.Printf("  Total Duration       : %v\n", epMetrics.TotalDuration)
-		fmt.Printf("  Average Response Time: %v\n", epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests))
-		fmt.Printf("  50th Percentile      : %v\n", epMetrics.ResponseTimes.Quantile(0.50))
-		fmt.Printf("  90th Percentile      : %v\n", epMetrics.ResponseTimes.Quantile(0.90))
-		fmt.Printf("  Total Bytes Received : %d\n", epMetrics.TotalBytesReceived)
-		fmt.Printf("  Total Bytes Sent     : %d\n", epMetrics.TotalBytesSent)
-		fmt.Printf("  Errors               : %d\n", epMetrics.Errors)
-		fmt.Println()
-		color.Green("  Status Code Counts:")
-		for code, count := range epMetrics.StatusCodeCounts {
-			fmt.Printf("    %d: %d\n", code, count)
-		}
-		fmt.Println()
+	// Summary statistics
+	totalRequests := 0
+	totalErrors := 0
+	totalDuration := time.Duration(0)
+	for _, epMetrics := range aggregatedMetrics {
+		totalRequests += epMetrics.Requests
+		totalErrors += epMetrics.Errors
+		totalDuration += epMetrics.TotalDuration
 	}
+
+	color.Green("Summary:")
+	fmt.Printf("  Total Requests       : %d\n", totalRequests)
+	fmt.Printf("  Total Errors         : %d\n", totalErrors)
+	fmt.Printf("  Total Duration       : %v\n", totalDuration)
+	fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
+	fmt.Println()
+
+	// Create a table for endpoint metrics
+	t := tabby.New()
+	t.AddHeader("Endpoint", "Total Requests", "Total Duration", "Average Response Time", "50th Percentile", "90th Percentile", "Total Bytes Received", "Total Bytes Sent", "Errors")
+
+	for key, epMetrics := range aggregatedMetrics {
+		t.AddLine(
+			key,
+			epMetrics.Requests,
+			epMetrics.TotalDuration,
+			epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests),
+			epMetrics.ResponseTimes.Quantile(0.50),
+			epMetrics.ResponseTimes.Quantile(0.90),
+			epMetrics.TotalBytesReceived,
+			epMetrics.TotalBytesSent,
+			epMetrics.Errors,
+		)
+	}
+
+	t.Print()
 
 	color.Cyan("=== End of Report ===")
 }

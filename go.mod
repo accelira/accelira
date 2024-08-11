@@ -3,6 +3,7 @@ module k7
 go 1.22.1
 
 require (
+	github.com/cheynewallace/tabby v1.1.1
 	github.com/dop251/goja v0.0.0-20240806095544-3491d4a58fbe
 	github.com/fatih/color v1.17.0
 	github.com/influxdata/tdigest v0.0.1

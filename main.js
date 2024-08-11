@@ -3,9 +3,9 @@ const assert = require('assert');
 const config = require('config'); // Import the config module
 
 // Set configuration values
-config.setIterations(10); // Example: Set iterations to 20
-config.setRampUpRate(3); // Example: Set ramp-up rate to 3 users per second
-config.setConcurrentUsers(20); // Example: Set concurrent users to 10
+config.setIterations(2); // Example: Set iterations to 20
+config.setRampUpRate(1); // Example: Set ramp-up rate to 3 users per second
+config.setConcurrentUsers(5); // Example: Set concurrent users to 10
 
 // Retrieve configuration values
 const iterations = config.getIterations();
