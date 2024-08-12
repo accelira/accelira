@@ -32,7 +32,12 @@ type Metrics struct {
 	EndpointMetricsMap map[string]*EndpointMetrics
 }
 
-func httpRequest(url string, method string, body io.Reader, metricsChan chan<- Metrics) (string, error) {
+type HttpResponse struct {
+	Body       string
+	StatusCode int
+}
+
+func httpRequest(url string, method string, body io.Reader, metricsChan chan<- Metrics) (HttpResponse, error) {
 	start := time.Now()
 
 	req, err := http.NewRequest(method, url, body)
@@ -42,7 +47,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 		default:
 			fmt.Println("Channel is full, dropping metrics")
 		}
-		return "", err
+		return HttpResponse{}, err
 	}
 
 	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
@@ -54,7 +59,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 		default:
 			fmt.Println("Channel is full, dropping metrics")
 		}
-		return "", err
+		return HttpResponse{}, err
 	}
 	defer resp.Body.Close()
 
@@ -65,7 +70,7 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 		default:
 			fmt.Println("Channel is full, dropping metrics")
 		}
-		return "", err
+		return HttpResponse{}, err
 	}
 
 	duration := time.Since(start)
@@ -95,7 +100,10 @@ func httpRequest(url string, method string, body io.Reader, metricsChan chan<- M
 		fmt.Println("Channel is full, dropping metrics")
 	}
 
-	return string(responseBody), nil
+	return HttpResponse{
+		Body:       string(responseBody),
+		StatusCode: resp.StatusCode,
+	}, nil
 }
 
 type Config struct {
@@ -143,17 +151,21 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 
 	modules := map[string]map[string]interface{}{
 		"http": {
-			"get": func(url string) (string, error) {
-				return httpRequest(url, "GET", nil, metricsChan)
+			"get": func(url string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "GET", nil, metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 			},
-			"post": func(url string, body string) (string, error) {
-				return httpRequest(url, "POST", strings.NewReader(body), metricsChan)
+			"post": func(url string, body string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "POST", strings.NewReader(body), metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 			},
-			"put": func(url string, body string) (string, error) {
-				return httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+			"put": func(url string, body string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 			},
-			"delete": func(url string) (string, error) {
-				return httpRequest(url, "DELETE", nil, metricsChan)
+			"delete": func(url string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "DELETE", nil, metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 			},
 		},
 		"assert": {
@@ -180,6 +192,7 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 
 	iterations := modules["config"]["getIterations"].(func() int)()
 
+	fmt.Printf("  the iterations value is     : %v\n", iterations)
 	for i := 0; i < iterations; i++ {
 		wrappedScript := fmt.Sprintf("(function() { %s })();", script)
 
@@ -236,7 +249,12 @@ func generateReport(metricsList []Metrics) {
 	fmt.Printf("  Total Requests       : %d\n", totalRequests)
 	fmt.Printf("  Total Errors         : %d\n", totalErrors)
 	fmt.Printf("  Total Duration       : %v\n", totalDuration)
-	fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
+
+	if totalRequests > 0 {
+		fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
+	} else {
+		fmt.Println("  Average Duration     : N/A (No requests made)")
+	}
 	fmt.Println()
 
 	// Create a table for endpoint metrics
@@ -244,11 +262,18 @@ func generateReport(metricsList []Metrics) {
 	t.AddHeader("Endpoint", "Total Requests", "Total Duration", "Average Response Time", "50th Percentile", "90th Percentile", "Total Bytes Received", "Total Bytes Sent", "Errors")
 
 	for key, epMetrics := range aggregatedMetrics {
+		var avgResponseTime interface{}
+		if epMetrics.Requests > 0 {
+			avgResponseTime = epMetrics.TotalResponseTime / time.Duration(epMetrics.Requests)
+		} else {
+			avgResponseTime = "N/A"
+		}
+
 		t.AddLine(
 			key,
 			epMetrics.Requests,
 			epMetrics.TotalDuration,
-			epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests),
+			avgResponseTime,
 			epMetrics.ResponseTimes.Quantile(0.50),
 			epMetrics.ResponseTimes.Quantile(0.90),
 			epMetrics.TotalBytesReceived,
@@ -319,15 +344,21 @@ func main() {
 	concurrentUsers := configModule["getConcurrentUsers"].(func() int)()
 	rampUpRate := configModule["getRampUpRate"].(func() int)()
 
+	var sleepDuration time.Duration
+	if rampUpRate > 0 {
+		sleepDuration = time.Second / time.Duration(rampUpRate)
+	} else {
+		sleepDuration = 0 // If rampUpRate is 0, no sleep (immediate start)
+	}
+
 	for i := 0; i < concurrentUsers; i++ {
 		wg.Add(1)
 		go runScript(string(script), metricsChan, &wg, config)
 
-		if rampUpRate > 0 && i < concurrentUsers-1 {
-			sleepDuration := time.Second / time.Duration(rampUpRate)
+		if sleepDuration > 0 && i < concurrentUsers-1 {
 			time.Sleep(sleepDuration)
 		}
-
+		fmt.Printf("  Current loaded users       : %d\n", i)
 	}
 
 	wg.Wait()
