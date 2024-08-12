@@ -269,7 +269,7 @@ func generateReport(metricsList []Metrics) {
 		}
 	}
 
-	color.New(color.FgCyan).Add(color.Bold).Println("=== Accelira Performance Test Report ===")
+	color.New(color.FgCyan).Add(color.Bold).Println("=== Performance Test Report ===")
 	fmt.Println()
 
 	// Summary statistics
@@ -289,31 +289,21 @@ func generateReport(metricsList []Metrics) {
 	fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
 	fmt.Println()
 
-	// Create a table for endpoint metrics with color formatting
+	// Create a table for endpoint metrics with enhanced styling
 	t := tabby.New()
-	t.AddHeader(
-		color.New(color.FgYellow).Sprintf("Endpoint"),
-		color.New(color.FgYellow).Sprintf("Requests"),
-		color.New(color.FgYellow).Sprintf("Duration"),
-		color.New(color.FgYellow).Sprintf("Avg. Response Time"),
-		color.New(color.FgYellow).Sprintf("50th Percentile"),
-		color.New(color.FgYellow).Sprintf("90th Percentile"),
-		color.New(color.FgYellow).Sprintf("Bytes Received"),
-		color.New(color.FgYellow).Sprintf("Bytes Sent"),
-		color.New(color.FgYellow).Sprintf("Errors"),
-	)
+	t.AddHeader("Endpoint", "Requests", "Duration", "Avg. Response Time", "50th Percentile", "90th Percentile", "Bytes Received", "Bytes Sent", "Errors")
 
 	for key, epMetrics := range aggregatedMetrics {
 		t.AddLine(
-			color.New(color.FgCyan).Sprint(key),
-			color.New(color.FgWhite).Sprintf("%d", epMetrics.Requests),
-			color.New(color.FgWhite).Sprintf("%v", epMetrics.TotalDuration),
-			color.New(color.FgWhite).Sprintf("%v", epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)),
-			color.New(color.FgWhite).Sprintf("%v", epMetrics.ResponseTimes.Quantile(0.50)),
-			color.New(color.FgWhite).Sprintf("%v", epMetrics.ResponseTimes.Quantile(0.90)),
-			color.New(color.FgWhite).Sprintf("%d", epMetrics.TotalBytesReceived),
-			color.New(color.FgWhite).Sprintf("%d", epMetrics.TotalBytesSent),
-			color.New(color.FgRed).Sprintf("%d", epMetrics.Errors),
+			key,
+			epMetrics.Requests,
+			epMetrics.TotalDuration,
+			epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests),
+			epMetrics.ResponseTimes.Quantile(0.50),
+			epMetrics.ResponseTimes.Quantile(0.90),
+			epMetrics.TotalBytesReceived,
+			epMetrics.TotalBytesSent,
+			epMetrics.Errors,
 		)
 	}
 
