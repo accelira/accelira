@@ -130,6 +130,7 @@ func createGroupModule(metricsChan chan<- Metrics, groupWG *sync.WaitGroup) map[
 			duration := time.Since(start)
 			metrics := collectGroupMetrics(name, duration)
 			if metricsChan != nil {
+				fmt.Printf("  sendMetrics group       : %v\n", metrics)
 				sendMetrics(metrics, metricsChan)
 			}
 			groupWG.Done()
@@ -305,11 +306,10 @@ func printDetailedReport(aggregatedMetrics map[string]*EndpointMetrics) {
 func createConfigVM(content string) (*goja.Runtime, *Config, error) {
 	vm := goja.New()
 	config := &Config{}
-	metricsChan := make(chan Metrics, 10000)
 	groupWG := &sync.WaitGroup{}
 
 	vm.Set("console", createConsoleModule())
-	vm.Set("require", createRequireModule(config, metricsChan, vm, groupWG)) // Pass the correct arguments
+	vm.Set("require", createRequireModule(config, nil, vm, groupWG)) // Pass the correct arguments
 
 	_, err := vm.RunScript("config.js", string(content))
 	if err != nil {
@@ -344,14 +344,23 @@ func main() {
 
 	metricsChan := make(chan Metrics, 10000)
 	metricsList := make([]Metrics, 0)
+	var mu sync.Mutex
 	groupWG := &sync.WaitGroup{}
+	metricsWG := &sync.WaitGroup{}
 
+	// Goroutine to process metrics
 	go func() {
+		defer metricsWG.Done() // Mark the metrics processing as done when the goroutine exits
 		for metrics := range metricsChan {
+			mu.Lock()
 			metricsList = append(metricsList, metrics)
+			fmt.Printf("  received metrics 001       : %v\n", metrics)
+			mu.Unlock()
 		}
 	}()
+	metricsWG.Add(1) // Indicate that there is one goroutine processing metrics
 
+	// Run the scripts
 	wg := &sync.WaitGroup{}
 	for i := 0; i < config.concurrentUsers; i++ {
 		wg.Add(1)
@@ -360,8 +369,10 @@ func main() {
 	}
 
 	wg.Wait()
-	groupWG.Wait() // Ensure all groups have finished
-	close(metricsChan)
+	groupWG.Wait()     // Ensure all groups have finished
+	close(metricsChan) // Safe to close the channel now
+
+	metricsWG.Wait() // Wait for the metrics processing to complete
 
 	generateReport(metricsList)
 }
