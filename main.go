@@ -134,11 +134,48 @@ func createConfigModule(config *Config) map[string]interface{} {
 	}
 }
 
+func createGroupModule(metricsChan chan<- Metrics) map[string]interface{} {
+	return map[string]interface{}{
+		"start": func(name string, fn goja.Callable) {
+			start := time.Now()
+
+			// Execute the group function
+			fn(nil, nil)
+
+			duration := time.Since(start)
+			metrics := Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
+			key := fmt.Sprintf("group: %s", name)
+
+			if _, exists := metrics.EndpointMetricsMap[key]; !exists {
+				metrics.EndpointMetricsMap[key] = &EndpointMetrics{
+					URL:              name,
+					Method:           "GROUP",
+					StatusCodeCounts: make(map[int]int),
+					ResponseTimes:    tdigest.New(),
+				}
+			}
+
+			epMetrics := metrics.EndpointMetricsMap[key]
+			epMetrics.Requests++
+			epMetrics.TotalDuration += duration // The time to execute the group function
+			epMetrics.TotalResponseTime += duration
+			epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
+
+			select {
+			case metricsChan <- metrics:
+			default:
+				fmt.Println("Channel is full, dropping metrics")
+			}
+		},
+	}
+}
+
 func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, config *Config) {
 	defer wg.Done()
 
 	vm := goja.New()
 	configModule := createConfigModule(config)
+	groupModule := createGroupModule(metricsChan)
 
 	vm.Set("console", map[string]interface{}{
 		"log": func(args ...interface{}) {
@@ -180,36 +217,7 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 			},
 		},
 		"config": configModule,
-		"group": {
-			"start": func(name string) func() {
-				start := time.Now()
-				return func() {
-					duration := time.Since(start)
-					metrics := Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
-					key := fmt.Sprintf("group: %s", name)
-					if _, exists := metrics.EndpointMetricsMap[key]; !exists {
-						metrics.EndpointMetricsMap[key] = &EndpointMetrics{
-							URL:              name,
-							Method:           "GROUP",
-							StatusCodeCounts: make(map[int]int),
-							ResponseTimes:    tdigest.New(),
-						}
-					}
-
-					epMetrics := metrics.EndpointMetricsMap[key]
-					epMetrics.Requests++
-					epMetrics.TotalDuration += duration
-					epMetrics.TotalResponseTime += duration
-					epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
-
-					select {
-					case metricsChan <- metrics:
-					default:
-						fmt.Println("Channel is full, dropping metrics")
-					}
-				}
-			},
-		},
+		"group":  groupModule,
 	}
 
 	vm.Set("require", func(moduleName string) interface{} {
@@ -221,7 +229,6 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 
 	iterations := modules["config"]["getIterations"].(func() int)()
 
-	fmt.Printf("  the iterations value is     : %v\n", iterations)
 	for i := 0; i < iterations; i++ {
 		wrappedScript := fmt.Sprintf("(function() { %s })();", script)
 
@@ -295,6 +302,23 @@ func generateReport(metricsList []Metrics) {
 	color.Green("=== End of Report ===")
 }
 
+func extractConfig(script string, config *Config) error {
+	vm := goja.New()
+	configModule := createConfigModule(config)
+
+	vm.Set("require", func(moduleName string) interface{} {
+		if moduleName == "config" {
+			return configModule
+		}
+		// Mock other modules if necessary, e.g., http, assert, group
+		return map[string]interface{}{}
+	})
+
+	// Run the entire script
+	_, err := vm.RunString(script)
+	return err
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run main.go <script.js>")
@@ -327,31 +351,78 @@ func main() {
 		metricsWaitGroup.Done()
 	}()
 
-	config := &Config{
-		iterations:      10,
-		rampUpRate:      1, // Default to 1 user per second
-		concurrentUsers: 5,
-	}
+	config := &Config{}
 
 	vm := goja.New()
 	configModule := createConfigModule(config)
+	groupModule := createGroupModule(metricsChan)
+
+	vm.Set("console", map[string]interface{}{
+		"log": func(args ...interface{}) {
+			for _, arg := range args {
+				fmt.Println(arg)
+			}
+		},
+	})
+
+	modules := map[string]map[string]interface{}{
+		"http": {
+			"get": func(url string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "GET", nil, metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			},
+			"post": func(url string, body string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "POST", strings.NewReader(body), metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			},
+			"put": func(url string, body string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			},
+			"delete": func(url string) (map[string]interface{}, error) {
+				resp, err := httpRequest(url, "DELETE", nil, metricsChan)
+				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			},
+		},
+		"assert": {
+			"equal": func(expected, actual interface{}) {
+				if expected != actual {
+					panic(fmt.Sprintf("Assertion failed: expected %v, got %v", expected, actual))
+				}
+			},
+			"notEqual": func(expected, actual interface{}) {
+				if expected == actual {
+					panic(fmt.Sprintf("Assertion failed: expected something different from %v, got %v", expected, actual))
+				}
+			},
+		},
+		"config": configModule,
+		"group":  groupModule,
+	}
 
 	vm.Set("require", func(moduleName string) interface{} {
-		if moduleName == "config" {
-			return configModule
+		if module, ok := modules[moduleName]; ok {
+			return module
 		}
 		return nil
 	})
 
+	// Execute the script to set configuration values
 	_, err = vm.RunScript("script.js", string(script))
 	if err != nil {
 		fmt.Println("Error running script:", err)
 		return
 	}
 
+	// Fetch the configuration values from the JavaScript context
 	concurrentUsers := configModule["getConcurrentUsers"].(func() int)()
 	rampUpRate := configModule["getRampUpRate"].(func() int)()
+	iterations := configModule["getIterations"].(func() int)()
+	fmt.Printf("Concurrent Users: %d\n", concurrentUsers)
+	fmt.Printf("Ramp Up Rate: %d\n", rampUpRate)
+	fmt.Printf("Iterations: %d\n", iterations)
 
+	// Start concurrent users with ramp-up logic
 	for i := 0; i < concurrentUsers; i++ {
 		wg.Add(1)
 		go runScript(string(script), metricsChan, &wg, config)
@@ -360,7 +431,6 @@ func main() {
 			sleepDuration := time.Second / time.Duration(rampUpRate)
 			time.Sleep(sleepDuration)
 		}
-
 	}
 
 	wg.Wait()
