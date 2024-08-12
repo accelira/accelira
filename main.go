@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheynewallace/tabby"
 	"github.com/dop251/goja"
 	"github.com/fatih/color"
 	"github.com/influxdata/tdigest"
@@ -181,6 +180,36 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 			},
 		},
 		"config": configModule,
+		"group": {
+			"start": func(name string) func() {
+				start := time.Now()
+				return func() {
+					duration := time.Since(start)
+					metrics := Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}
+					key := fmt.Sprintf("group: %s", name)
+					if _, exists := metrics.EndpointMetricsMap[key]; !exists {
+						metrics.EndpointMetricsMap[key] = &EndpointMetrics{
+							URL:              name,
+							Method:           "GROUP",
+							StatusCodeCounts: make(map[int]int),
+							ResponseTimes:    tdigest.New(),
+						}
+					}
+
+					epMetrics := metrics.EndpointMetricsMap[key]
+					epMetrics.Requests++
+					epMetrics.TotalDuration += duration
+					epMetrics.TotalResponseTime += duration
+					epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
+
+					select {
+					case metricsChan <- metrics:
+					default:
+						fmt.Println("Channel is full, dropping metrics")
+					}
+				}
+			},
+		},
 	}
 
 	vm.Set("require", func(moduleName string) interface{} {
@@ -249,42 +278,21 @@ func generateReport(metricsList []Metrics) {
 	fmt.Printf("  Total Requests       : %d\n", totalRequests)
 	fmt.Printf("  Total Errors         : %d\n", totalErrors)
 	fmt.Printf("  Total Duration       : %v\n", totalDuration)
-
-	if totalRequests > 0 {
-		fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
-	} else {
-		fmt.Println("  Average Duration     : N/A (No requests made)")
-	}
 	fmt.Println()
 
-	// Create a table for endpoint metrics
-	t := tabby.New()
-	t.AddHeader("Endpoint", "Total Requests", "Total Duration", "Average Response Time", "50th Percentile", "90th Percentile", "Total Bytes Received", "Total Bytes Sent", "Errors")
-
+	// Detailed statistics
 	for key, epMetrics := range aggregatedMetrics {
-		var avgResponseTime interface{}
-		if epMetrics.Requests > 0 {
-			avgResponseTime = epMetrics.TotalResponseTime / time.Duration(epMetrics.Requests)
-		} else {
-			avgResponseTime = "N/A"
-		}
-
-		t.AddLine(
-			key,
-			epMetrics.Requests,
-			epMetrics.TotalDuration,
-			avgResponseTime,
-			epMetrics.ResponseTimes.Quantile(0.50),
-			epMetrics.ResponseTimes.Quantile(0.90),
-			epMetrics.TotalBytesReceived,
-			epMetrics.TotalBytesSent,
-			epMetrics.Errors,
-		)
+		color.Green("Endpoint: %s", key)
+		fmt.Printf("  Requests           : %d\n", epMetrics.Requests)
+		fmt.Printf("  Errors             : %d\n", epMetrics.Errors)
+		fmt.Printf("  Total Duration     : %v\n", epMetrics.TotalDuration)
+		fmt.Printf("  Response Time P50  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.5))
+		fmt.Printf("  Response Time P90  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.9))
+		fmt.Printf("  Response Time P99  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.99))
+		fmt.Println()
 	}
 
-	t.Print()
-
-	color.Cyan("=== End of Report ===")
+	color.Green("=== End of Report ===")
 }
 
 func main() {
@@ -344,21 +352,15 @@ func main() {
 	concurrentUsers := configModule["getConcurrentUsers"].(func() int)()
 	rampUpRate := configModule["getRampUpRate"].(func() int)()
 
-	var sleepDuration time.Duration
-	if rampUpRate > 0 {
-		sleepDuration = time.Second / time.Duration(rampUpRate)
-	} else {
-		sleepDuration = 0 // If rampUpRate is 0, no sleep (immediate start)
-	}
-
 	for i := 0; i < concurrentUsers; i++ {
 		wg.Add(1)
 		go runScript(string(script), metricsChan, &wg, config)
 
-		if sleepDuration > 0 && i < concurrentUsers-1 {
+		if rampUpRate > 0 && i < concurrentUsers-1 {
+			sleepDuration := time.Second / time.Duration(rampUpRate)
 			time.Sleep(sleepDuration)
 		}
-		fmt.Printf("  Current loaded users       : %d\n", i)
+
 	}
 
 	wg.Wait()

@@ -1,66 +1,40 @@
 const http = require('http');
 const assert = require('assert');
-const config = require('config'); // Import the config module
+const config = require('config');
+const group = require('group');
 
-// Set configuration values
-config.setIterations(2); // Example: Set iterations to 20
-config.setRampUpRate(1); // Example: Set ramp-up rate to 3 users per second
-config.setConcurrentUsers(5); // Example: Set concurrent users to 10
 
-// Retrieve configuration values
-const iterations = config.getIterations();
-const rampUpRate = config.getRampUpRate();
-const concurrentUsers = config.getConcurrentUsers();
-
-async function performHttpRequest(url, method, body = null) {
-    let response;
-    try {
-        switch (method) {
-            case 'GET':
-                response = await http.get(url);
-                break;
-            case 'POST':
-                response = await http.post(url, body);
-                break;
-            case 'PUT':
-                response = await http.put(url, body);
-                break;
-            case 'DELETE':
-                response = await http.delete(url);
-                break;
-            default:
-                throw new Error('Invalid HTTP method');
-        }
-        return response;
-    } catch (error) {
-        console.error(`Error in ${method} request to ${url}:`, error);
-    }
-}
+config.setIterations(2); // Example: Set iterations to 2
+config.setRampUpRate(2); // Example: Set ramp-up rate to 1 user per second
+config.setConcurrentUsers(10); // Example: Set concurrent users to 5
 
 async function main() {
     console.log("Starting script execution...");
-    console.log(`Config - Iterations: ${iterations}, Ramp-Up Rate: ${rampUpRate} users/sec, Concurrent Users: ${concurrentUsers}`);
 
-    const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
-    const postUrl = "https://jsonplaceholder.typicode.com/posts";
-    const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
-    const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
+    const endGroup = group.start("User Workflow");
+    try {
+        const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
+        const postUrl = "https://jsonplaceholder.typicode.com/posts";
+        const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
+        const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
 
-    // Perform HTTP requests
-    const getResponse = await performHttpRequest(getUrl, 'GET');
-    console.log("GET Response:", getResponse);
+        const getResponse = await http.get(getUrl);
+		console.log(getResponse)
+        assert.equal(getResponse.status, 200);
 
-    const postResponse = await performHttpRequest(postUrl, 'POST', JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
-    console.log("POST Response:", postResponse);
+        const postResponse = await http.post(postUrl, JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
+        assert.equal(postResponse.status, 201);
 
-    const putResponse = await performHttpRequest(putUrl, 'PUT', JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
-    console.log("PUT Response:", putResponse);
+        const putResponse = await http.put(putUrl, JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
+        assert.equal(putResponse.status, 200);
 
-    const deleteResponse = await performHttpRequest(deleteUrl, 'DELETE');
-    console.log("DELETE Response:", deleteResponse);
-
-    // Example assertion
-    assert.equal(getResponse.includes('userId'), true);
+        const deleteResponse = await http.delete(deleteUrl);
+        assert.equal(deleteResponse.status, 200);
+    } catch (error) {
+        console.error("An error occurred within the group:", error);
+    } finally {
+        endGroup(); // End the group and record the metrics
+    }
 }
 
 main();
