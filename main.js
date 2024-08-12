@@ -7,7 +7,6 @@ config.setIterations(2);
 config.setRampUpRate(2);
 config.setConcurrentUsers(10);
 
-console.log("Starting script execution...");
 
 group.start("All tested requests", function() {
     const getUrl = "https://jsonplaceholder.typicode.com/todos/1";

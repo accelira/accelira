@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cheynewallace/tabby"
 	"github.com/dop251/goja"
 	"github.com/fatih/color"
 	"github.com/influxdata/tdigest"
@@ -268,7 +269,7 @@ func generateReport(metricsList []Metrics) {
 		}
 	}
 
-	color.Cyan("=== Performance Test Report ===")
+	color.New(color.FgCyan).Add(color.Bold).Println("=== Accelira Performance Test Report ===")
 	fmt.Println()
 
 	// Summary statistics
@@ -281,42 +282,44 @@ func generateReport(metricsList []Metrics) {
 		totalDuration += epMetrics.TotalDuration
 	}
 
-	color.Green("Summary:")
+	color.New(color.FgGreen).Add(color.Bold).Println("Summary:")
 	fmt.Printf("  Total Requests       : %d\n", totalRequests)
 	fmt.Printf("  Total Errors         : %d\n", totalErrors)
 	fmt.Printf("  Total Duration       : %v\n", totalDuration)
+	fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
 	fmt.Println()
 
-	// Detailed statistics
+	// Create a table for endpoint metrics with color formatting
+	t := tabby.New()
+	t.AddHeader(
+		color.New(color.FgYellow).Sprintf("Endpoint"),
+		color.New(color.FgYellow).Sprintf("Requests"),
+		color.New(color.FgYellow).Sprintf("Duration"),
+		color.New(color.FgYellow).Sprintf("Avg. Response Time"),
+		color.New(color.FgYellow).Sprintf("50th Percentile"),
+		color.New(color.FgYellow).Sprintf("90th Percentile"),
+		color.New(color.FgYellow).Sprintf("Bytes Received"),
+		color.New(color.FgYellow).Sprintf("Bytes Sent"),
+		color.New(color.FgYellow).Sprintf("Errors"),
+	)
+
 	for key, epMetrics := range aggregatedMetrics {
-		color.Green("Endpoint: %s", key)
-		fmt.Printf("  Requests           : %d\n", epMetrics.Requests)
-		fmt.Printf("  Errors             : %d\n", epMetrics.Errors)
-		fmt.Printf("  Total Duration     : %v\n", epMetrics.TotalDuration)
-		fmt.Printf("  Response Time P50  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.5))
-		fmt.Printf("  Response Time P90  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.9))
-		fmt.Printf("  Response Time P99  : %.2fms\n", epMetrics.ResponseTimes.Quantile(0.99))
-		fmt.Println()
+		t.AddLine(
+			color.New(color.FgCyan).Sprint(key),
+			color.New(color.FgWhite).Sprintf("%d", epMetrics.Requests),
+			color.New(color.FgWhite).Sprintf("%v", epMetrics.TotalDuration),
+			color.New(color.FgWhite).Sprintf("%v", epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)),
+			color.New(color.FgWhite).Sprintf("%v", epMetrics.ResponseTimes.Quantile(0.50)),
+			color.New(color.FgWhite).Sprintf("%v", epMetrics.ResponseTimes.Quantile(0.90)),
+			color.New(color.FgWhite).Sprintf("%d", epMetrics.TotalBytesReceived),
+			color.New(color.FgWhite).Sprintf("%d", epMetrics.TotalBytesSent),
+			color.New(color.FgRed).Sprintf("%d", epMetrics.Errors),
+		)
 	}
 
-	color.Green("=== End of Report ===")
-}
+	t.Print()
 
-func extractConfig(script string, config *Config) error {
-	vm := goja.New()
-	configModule := createConfigModule(config)
-
-	vm.Set("require", func(moduleName string) interface{} {
-		if moduleName == "config" {
-			return configModule
-		}
-		// Mock other modules if necessary, e.g., http, assert, group
-		return map[string]interface{}{}
-	})
-
-	// Run the entire script
-	_, err := vm.RunString(script)
-	return err
+	color.New(color.FgCyan).Add(color.Bold).Println("=== End of Report ===")
 }
 
 func main() {
