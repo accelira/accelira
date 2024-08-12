@@ -348,7 +348,6 @@ func main() {
 
 	vm := goja.New()
 	configModule := createConfigModule(config)
-	groupModule := createGroupModule(metricsChan)
 
 	vm.Set("console", map[string]interface{}{
 		"log": func(args ...interface{}) {
@@ -361,20 +360,19 @@ func main() {
 	modules := map[string]map[string]interface{}{
 		"http": {
 			"get": func(url string) (map[string]interface{}, error) {
-				resp, err := httpRequest(url, "GET", nil, metricsChan)
-				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+				return nil, nil
 			},
 			"post": func(url string, body string) (map[string]interface{}, error) {
-				resp, err := httpRequest(url, "POST", strings.NewReader(body), metricsChan)
-				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+				return nil, nil
+
 			},
 			"put": func(url string, body string) (map[string]interface{}, error) {
-				resp, err := httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
-				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+				return nil, nil
+
 			},
 			"delete": func(url string) (map[string]interface{}, error) {
-				resp, err := httpRequest(url, "DELETE", nil, metricsChan)
-				return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+				return nil, nil
+
 			},
 		},
 		"assert": {
@@ -390,7 +388,11 @@ func main() {
 			},
 		},
 		"config": configModule,
-		"group":  groupModule,
+		"group": {
+			"start": func(name string, fn goja.Callable) {
+
+			},
+		},
 	}
 
 	vm.Set("require", func(moduleName string) interface{} {
