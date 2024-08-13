@@ -186,7 +186,7 @@ func createConsoleModule() map[string]interface{} {
 func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Runtime, groupWG *sync.WaitGroup) func(moduleName string) interface{} {
 	return func(moduleName string) interface{} {
 		switch moduleName {
-		case "http":
+		case "Accelira/http":
 			return map[string]interface{}{
 				"get": func(url string) (map[string]interface{}, error) {
 					if metricsChan == nil {
@@ -217,7 +217,7 @@ func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Ru
 					return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 				},
 			}
-		case "assert":
+		case "Accelira/assert":
 			return map[string]interface{}{
 				"equal": func(expected, actual interface{}) {
 					if expected != actual {
@@ -230,9 +230,9 @@ func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Ru
 					}
 				},
 			}
-		case "config":
+		case "Accelira/config":
 			return createConfigModule(config)
-		case "group":
+		case "Accelira/group":
 			return createGroupModule(metricsChan, groupWG)
 		default:
 			return nil

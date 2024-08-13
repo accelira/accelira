@@ -1,7 +1,7 @@
-const http = require('http');
-const assert = require('assert');
-const config = require('config');
-const group = require('group');
+const http = require('Accelira/http');
+const assert = require('Accelira/assert');
+const config = require('Accelira/config');
+const group = require('Accelira/group');
 
 config.setIterations(2);
 config.setRampUpRate(2);

@@ -1,7 +1,7 @@
-import http from "http"
-import assert from "assert"
-import config from "config"
-import group from "group"
+import http from "Accelira/http";
+import assert from "Accelira/assert";
+import config from "Accelira/config";
+import group from "Accelira/group";
 
 config.setIterations(2);
 config.setRampUpRate(2);
