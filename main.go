@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -238,7 +239,6 @@ func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Ru
 		}
 	}
 }
-
 func generateReport(metricsList []Metrics) {
 	aggregatedMetrics := aggregateMetrics(metricsList)
 	printSummary(aggregatedMetrics)
@@ -290,16 +290,29 @@ func printSummary(aggregatedMetrics map[string]*EndpointMetrics) {
 	fmt.Println()
 }
 
+func roundDurationToTwoDecimals(d time.Duration) time.Duration {
+	// Convert duration to seconds as a float64
+	seconds := d.Seconds()
+
+	// Round to two decimal places
+	roundedSeconds := math.Round(seconds*100) / 100
+
+	// Convert back to time.Duration
+	return time.Duration(roundedSeconds * float64(time.Second))
+}
+
 func printDetailedReport(aggregatedMetrics map[string]*EndpointMetrics) {
 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
 	t := tabby.New()
-	t.AddHeader("Endpoint", "Requests", "Errors", "Avg. Response Time", "Status Codes")
+	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
 	for key, epMetrics := range aggregatedMetrics {
 		statusCodes := make([]string, 0)
 		for code, count := range epMetrics.StatusCodeCounts {
 			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
 		}
-		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests), strings.Join(statusCodes, ", "))
+		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
+		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
+		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)), time.Duration(percentile50)*time.Millisecond, time.Duration(percentile95)*time.Millisecond, strings.Join(statusCodes, ", "))
 	}
 	t.Print()
 }
