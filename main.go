@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/cheynewallace/tabby"
 	"github.com/dop251/goja"
+	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fatih/color"
 	"github.com/influxdata/tdigest"
 )
@@ -130,7 +132,6 @@ func createGroupModule(metricsChan chan<- Metrics, groupWG *sync.WaitGroup) map[
 			duration := time.Since(start)
 			metrics := collectGroupMetrics(name, duration)
 			if metricsChan != nil {
-				fmt.Printf("  sendMetrics group       : %v\n", metrics)
 				sendMetrics(metrics, metricsChan)
 			}
 			groupWG.Done()
@@ -319,6 +320,52 @@ func createConfigVM(content string) (*goja.Runtime, *Config, error) {
 	return vm, config, nil
 }
 
+func esbuildTransform(src, filename string) (string, error) {
+	opts := api.TransformOptions{
+		Sourcefile:     filename,
+		Loader:         api.LoaderJS,
+		Target:         api.ESNext,
+		Format:         api.FormatIIFE, // Use IIFE to handle imports/exports
+		Sourcemap:      api.SourceMapExternal,
+		SourcesContent: api.SourcesContentInclude,
+		LegalComments:  api.LegalCommentsNone,
+		Platform:       api.PlatformNeutral,
+		LogLevel:       api.LogLevelSilent,
+		Charset:        api.CharsetUTF8,
+	}
+
+	result := api.Transform(src, opts)
+
+	if len(result.Errors) > 0 {
+		msg := result.Errors[0]
+		err := fmt.Errorf("esbuild error: %s", msg.Text)
+		if msg.Location != nil {
+			err = fmt.Errorf("esbuild error: %s at %s:%d:%d", msg.Text, msg.Location.File, msg.Location.Line, msg.Location.Column)
+		}
+		return "", err
+	}
+
+	return string(result.Code), nil
+}
+
+// LoadModule loads a JavaScript module from a file and transforms it using esbuild
+func LoadModule(runtime *goja.Runtime, modulePath string) (string, error) {
+	content, err := ioutil.ReadFile(modulePath)
+	if err != nil {
+		return "", err
+	}
+
+	code, err := esbuildTransform(string(content), modulePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Log the transformed code
+	fmt.Printf("Transformed code for %s:\n%s\n", modulePath, code)
+
+	return code, err
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide the JavaScript file path as an argument")
@@ -326,13 +373,16 @@ func main() {
 	}
 
 	filePath := os.Args[1]
-	content, err := os.ReadFile(filePath)
+	_, err := os.ReadFile(filePath)
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		return
 	}
 
-	_, config, err := createConfigVM(string(content))
+	runtime := goja.New()
+	code, err := LoadModule(runtime, filePath)
+
+	_, config, err := createConfigVM(string(code))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -354,7 +404,6 @@ func main() {
 		for metrics := range metricsChan {
 			mu.Lock()
 			metricsList = append(metricsList, metrics)
-			fmt.Printf("  received metrics 001       : %v\n", metrics)
 			mu.Unlock()
 		}
 	}()
@@ -364,7 +413,7 @@ func main() {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < config.concurrentUsers; i++ {
 		wg.Add(1)
-		go runScript(string(content), metricsChan, wg, config, groupWG)
+		go runScript(string(code), metricsChan, wg, config, groupWG)
 		time.Sleep(time.Duration(1000/config.rampUpRate) * time.Millisecond)
 	}
 
