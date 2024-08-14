@@ -1,4 +1,4 @@
-module k7
+module github.com/accelira/accelira
 
 go 1.22.1
 

@@ -2,10 +2,12 @@ import http from "Accelira/http";
 import assert from "Accelira/assert";
 import config from "Accelira/config";
 import group from "Accelira/group";
+import { options } from './options.js';
 
-config.setIterations(2);
-config.setRampUpRate(2);
-config.setConcurrentUsers(10);
+
+config.setIterations(options.iterations);
+config.setRampUpRate(options.rampUpRate);
+config.setConcurrentUsers(options.concurrentUsers);
 
 group.start("All tested requests", function() {
     const getUrl = "https://jsonplaceholder.typicode.com/todos/1";

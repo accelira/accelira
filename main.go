@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -386,14 +387,21 @@ func main() {
 	}
 
 	filePath := os.Args[1]
-	_, err := os.ReadFile(filePath)
-	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return
+	result := api.Build(api.BuildOptions{
+		EntryPoints: []string{filePath},
+		Bundle:      true,
+		Write:       false,
+		Format:      api.FormatCommonJS,
+		Target:      api.ES2015,
+		External:    []string{"Accelira/http", "Accelira/assert", "Accelira/config", "Accelira/group"},
+	})
+
+	if len(result.Errors) > 0 {
+		log.Fatalf("esbuild errors: %v", result.Errors)
 	}
 
-	runtime := goja.New()
-	code, err := LoadModule(runtime, filePath)
+	// Get the bundled code
+	code := string(result.OutputFiles[0].Contents)
 
 	_, config, err := createConfigVM(string(code))
 	if err != nil {
