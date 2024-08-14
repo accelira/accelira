@@ -69,6 +69,8 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- Metrics)
 	metrics := collectMetrics(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration)
 	sendMetrics(metrics, metricsChan)
 
+	fmt.Printf("\r%s %s - Status: %d, Duration: %v", method, url, resp.StatusCode, duration)
+
 	return HttpResponse{Body: string(responseBody), StatusCode: resp.StatusCode}, nil
 }
 
@@ -276,7 +278,7 @@ func mergeEndpointMetrics(dest, src *EndpointMetrics) {
 }
 
 func printSummary(aggregatedMetrics map[string]*EndpointMetrics) {
-	color.New(color.FgCyan).Add(color.Bold).Println("=== Performance Test Report ===")
+	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
 	color.New(color.FgGreen).Add(color.Bold).Println("Summary:")
 	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
 	for _, epMetrics := range aggregatedMetrics {

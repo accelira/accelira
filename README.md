@@ -1,6 +1,9 @@
 # accelira
 **Accelira** is an open-source performance testing tool inspired by K6, designed to simplify and accelerate performance testing for modern applications. By combining the power of Go with the flexibility of JavaScript, Accelira offers an intuitive and efficient way to measure and optimize your application’s performance.
 
+![Demo of Accelira](demos/demo.svg)
+
+
 ## Table of Contents
 
 - [Features](#features)
