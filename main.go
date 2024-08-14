@@ -1,47 +1,32 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/cheynewallace/tabby"
+	"github.com/accelira/accelira/report"
 	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
-	"github.com/fatih/color"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/influxdata/tdigest"
 )
-
-type EndpointMetrics struct {
-	URL                string
-	Method             string
-	Requests           int
-	TotalDuration      time.Duration
-	TotalResponseTime  time.Duration
-	TotalBytesReceived int
-	TotalBytesSent     int
-	StatusCodeCounts   map[int]int
-	Errors             int
-	ResponseTimes      *tdigest.TDigest
-}
-
-type Metrics struct {
-	EndpointMetricsMap map[string]*EndpointMetrics
-}
 
 type HttpResponse struct {
 	Body       string
 	StatusCode int
 }
 
-func httpRequest(url, method string, body io.Reader, metricsChan chan<- Metrics) (HttpResponse, error) {
+func httpRequest(url, method string, body io.Reader, metricsChan chan<- report.Metrics) (HttpResponse, error) {
 	start := time.Now()
 
 	req, err := http.NewRequest(method, url, body)
@@ -74,17 +59,17 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- Metrics)
 	return HttpResponse{Body: string(responseBody), StatusCode: resp.StatusCode}, nil
 }
 
-func sendEmptyMetrics(metricsChan chan<- Metrics) {
+func sendEmptyMetrics(metricsChan chan<- report.Metrics) {
 	select {
-	case metricsChan <- Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{}}:
+	case metricsChan <- report.Metrics{EndpointMetricsMap: map[string]*report.EndpointMetrics{}}:
 	default:
 		fmt.Println("Channel is full, dropping metrics")
 	}
 }
 
-func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int, duration time.Duration) Metrics {
+func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int, duration time.Duration) report.Metrics {
 	key := fmt.Sprintf("%s %s", method, url)
-	epMetrics := &EndpointMetrics{
+	epMetrics := &report.EndpointMetrics{
 		URL:              url,
 		Method:           method,
 		StatusCodeCounts: make(map[int]int),
@@ -99,10 +84,10 @@ func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int
 	epMetrics.StatusCodeCounts[statusCode]++
 	epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
 
-	return Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{key: epMetrics}}
+	return report.Metrics{EndpointMetricsMap: map[string]*report.EndpointMetrics{key: epMetrics}}
 }
 
-func sendMetrics(metrics Metrics, metricsChan chan<- Metrics) {
+func sendMetrics(metrics report.Metrics, metricsChan chan<- report.Metrics) {
 	select {
 	case metricsChan <- metrics:
 	default:
@@ -127,10 +112,9 @@ func createConfigModule(config *Config) map[string]interface{} {
 	}
 }
 
-func createGroupModule(metricsChan chan<- Metrics, groupWG *sync.WaitGroup) map[string]interface{} {
+func createGroupModule(metricsChan chan<- report.Metrics) map[string]interface{} {
 	return map[string]interface{}{
 		"start": func(name string, fn goja.Callable) {
-			groupWG.Add(1)
 			start := time.Now()
 			fn(nil, nil) // Execute the group function
 			duration := time.Since(start)
@@ -138,14 +122,13 @@ func createGroupModule(metricsChan chan<- Metrics, groupWG *sync.WaitGroup) map[
 			if metricsChan != nil {
 				sendMetrics(metrics, metricsChan)
 			}
-			groupWG.Done()
 		},
 	}
 }
 
-func collectGroupMetrics(name string, duration time.Duration) Metrics {
+func collectGroupMetrics(name string, duration time.Duration) report.Metrics {
 	key := fmt.Sprintf("group: %s", name)
-	epMetrics := &EndpointMetrics{
+	epMetrics := &report.EndpointMetrics{
 		URL:              name,
 		Method:           "GROUP",
 		StatusCodeCounts: make(map[int]int),
@@ -157,15 +140,18 @@ func collectGroupMetrics(name string, duration time.Duration) Metrics {
 	epMetrics.TotalResponseTime += duration
 	epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
 
-	return Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{key: epMetrics}}
+	return report.Metrics{EndpointMetricsMap: map[string]*report.EndpointMetrics{key: epMetrics}}
 }
 
-func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, config *Config, groupWG *sync.WaitGroup) {
+func runScript(script string, metricsChan chan<- report.Metrics, wg *sync.WaitGroup, config *Config) {
 	defer wg.Done()
 
 	vm := goja.New()
-	vm.Set("console", createConsoleModule())
-	vm.Set("require", createRequireModule(config, metricsChan, vm, groupWG))
+	setupFsModule(vm)
+	setupCryptoModule(vm)
+	setupJsonWebTokenModule(vm)
+	setupConsoleModule(vm)
+	vm.Set("require", setupRequire(config, metricsChan))
 
 	iterations := config.iterations
 	for i := 0; i < iterations; i++ {
@@ -176,17 +162,136 @@ func runScript(script string, metricsChan chan<- Metrics, wg *sync.WaitGroup, co
 	}
 }
 
-func createConsoleModule() map[string]interface{} {
-	return map[string]interface{}{
-		"log": func(args ...interface{}) {
-			for _, arg := range args {
-				fmt.Println(arg)
-			}
-		},
+func createConfigVM(content string) (*goja.Runtime, *Config, error) {
+	vm := goja.New()
+	config := &Config{}
+	setupFsModule(vm)
+	setupCryptoModule(vm)
+	setupJsonWebTokenModule(vm)
+	setupConsoleModule(vm)
+
+	vm.Set("require", setupRequire(config, nil)) // Pass the correct arguments
+
+	_, err := vm.RunScript("config.js", string(content))
+	if err != nil {
+		return nil, nil, fmt.Errorf("error running configuration script: %w", err)
 	}
+
+	return vm, config, nil
 }
 
-func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Runtime, groupWG *sync.WaitGroup) func(moduleName string) interface{} {
+// Setup fs module for Goja
+func setupFsModule(vm *goja.Runtime) {
+	vm.Set("fs", map[string]interface{}{
+		"readFileSync": func(filename string, encoding string) string {
+			data, err := os.ReadFile(filename)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err)
+			}
+			return string(data)
+		},
+	})
+}
+
+// Setup crypto module for Goja
+func setupCryptoModule(vm *goja.Runtime) {
+	crypto := vm.NewObject()
+
+	crypto.Set("randomBytes", func(call goja.FunctionCall) goja.Value {
+		size := call.Argument(0).ToInteger()
+		bytes := make([]byte, size)
+		_, err := rand.Read(bytes)
+		if err != nil {
+			return vm.ToValue(nil)
+		}
+		return vm.ToValue(bytes)
+	})
+
+	crypto.Set("createHash", func(call goja.FunctionCall) goja.Value {
+		hash := sha256.New()
+		return vm.ToValue(map[string]interface{}{
+			"update": func(data string) {
+				hash.Write([]byte(data))
+			},
+			"digest": func(encoding string) string {
+				return base64Encode(hash.Sum(nil))
+			},
+		})
+	})
+
+	crypto.Set("createHmac", func(call goja.FunctionCall) goja.Value {
+		key := call.Argument(1).String()
+		h := hmac.New(sha256.New, []byte(key))
+		return vm.ToValue(map[string]interface{}{
+			"update": func(data string) {
+				h.Write([]byte(data))
+			},
+			"digest": func(encoding string) string {
+				return base64Encode(h.Sum(nil))
+			},
+		})
+	})
+
+	vm.Set("crypto", crypto)
+}
+
+// Setup jsonwebtoken module for Goja
+func setupJsonWebTokenModule(vm *goja.Runtime) {
+	vm.Set("jsonwebtoken", map[string]interface{}{
+		"sign": func(payload map[string]interface{}, privateKey string, options map[string]interface{}) (string, error) {
+			// Validate the key
+			if len(privateKey) == 0 {
+				return "", fmt.Errorf("private key is empty")
+			}
+
+			// Parse the private key
+			parsedKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKey))
+			if err != nil {
+				return "", fmt.Errorf("error parsing private key: %v", err)
+			}
+
+			// Create the token
+			token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims(payload))
+			tokenString, err := token.SignedString(parsedKey)
+			if err != nil {
+				return "", fmt.Errorf("error signing token: %v", err)
+			}
+			return tokenString, nil
+		},
+	})
+}
+
+// Setup console module for Goja
+func setupConsoleModule(vm *goja.Runtime) {
+	console := vm.NewObject()
+
+	console.Set("log", func(call goja.FunctionCall) goja.Value {
+		args := make([]any, len(call.Arguments))
+		for i, arg := range call.Arguments {
+			args[i] = arg.Export()
+		}
+		fmt.Println(args...)
+		return nil
+	})
+
+	console.Set("error", func(call goja.FunctionCall) goja.Value {
+		args := make([]any, len(call.Arguments))
+		for i, arg := range call.Arguments {
+			args[i] = arg.Export()
+		}
+		fmt.Fprintln(os.Stderr, args...)
+		return nil
+	})
+
+	vm.Set("console", console)
+}
+
+// Helper function to base64 encode byte slices
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func setupRequire(config *Config, metricsChan chan<- report.Metrics) func(moduleName string) interface{} {
 	return func(moduleName string) interface{} {
 		switch moduleName {
 		case "Accelira/http":
@@ -236,150 +341,77 @@ func createRequireModule(config *Config, metricsChan chan<- Metrics, vm *goja.Ru
 		case "Accelira/config":
 			return createConfigModule(config)
 		case "Accelira/group":
-			return createGroupModule(metricsChan, groupWG)
+			return createGroupModule(metricsChan)
+		case "fs":
+			return map[string]interface{}{
+				"readFileSync": func(filename string, encoding string) string {
+					data, err := os.ReadFile(filename)
+					if err != nil {
+						return fmt.Sprintf("Error: %v", err)
+					}
+					return string(data)
+				},
+			}
+		case "crypto":
+			return map[string]interface{}{
+				"randomBytes": func(size int) []byte {
+					bytes := make([]byte, size)
+					_, err := rand.Read(bytes)
+					if err != nil {
+						return nil
+					}
+					return bytes
+				},
+				"createHash": func(algorithm string) map[string]interface{} {
+					hash := sha256.New()
+					return map[string]interface{}{
+						"update": func(data string) {
+							hash.Write([]byte(data))
+						},
+						"digest": func(encoding string) string {
+							return base64Encode(hash.Sum(nil))
+						},
+					}
+				},
+				"createHmac": func(algorithm string, key string) map[string]interface{} {
+					h := hmac.New(sha256.New, []byte(key))
+					return map[string]interface{}{
+						"update": func(data string) {
+							h.Write([]byte(data))
+						},
+						"digest": func(encoding string) string {
+							return base64Encode(h.Sum(nil))
+						},
+					}
+				},
+			}
+		case "jsonwebtoken":
+			return map[string]interface{}{
+				"sign": func(payload map[string]interface{}, privateKey string, options map[string]interface{}) (string, error) {
+					// Validate the key
+					if len(privateKey) == 0 {
+						return "", fmt.Errorf("private key is empty")
+					}
+
+					// Parse the private key
+					parsedKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKey))
+					if err != nil {
+						return "", fmt.Errorf("error parsing private key: %v", err)
+					}
+
+					// Create the token
+					token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims(payload))
+					tokenString, err := token.SignedString(parsedKey)
+					if err != nil {
+						return "", fmt.Errorf("error signing token: %v", err)
+					}
+					return tokenString, nil
+				},
+			}
 		default:
 			return nil
 		}
 	}
-}
-func generateReport(metricsList []Metrics) {
-	aggregatedMetrics := aggregateMetrics(metricsList)
-	printSummary(aggregatedMetrics)
-	printDetailedReport(aggregatedMetrics)
-}
-
-func aggregateMetrics(metricsList []Metrics) map[string]*EndpointMetrics {
-	aggregatedMetrics := make(map[string]*EndpointMetrics)
-	for _, metrics := range metricsList {
-		for key, epMetrics := range metrics.EndpointMetricsMap {
-			if _, exists := aggregatedMetrics[key]; !exists {
-				aggregatedMetrics[key] = &EndpointMetrics{
-					StatusCodeCounts: make(map[int]int),
-					ResponseTimes:    tdigest.New(),
-				}
-			}
-			mergeEndpointMetrics(aggregatedMetrics[key], epMetrics)
-		}
-	}
-	return aggregatedMetrics
-}
-
-func mergeEndpointMetrics(dest, src *EndpointMetrics) {
-	dest.Requests += src.Requests
-	dest.TotalDuration += src.TotalDuration
-	dest.TotalResponseTime += src.TotalResponseTime
-	dest.TotalBytesReceived += src.TotalBytesReceived
-	dest.TotalBytesSent += src.TotalBytesSent
-	dest.Errors += src.Errors
-	dest.ResponseTimes.Add(src.ResponseTimes.Quantile(0.5), 1)
-	for code, count := range src.StatusCodeCounts {
-		dest.StatusCodeCounts[code] += count
-	}
-}
-
-func printSummary(aggregatedMetrics map[string]*EndpointMetrics) {
-	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
-	color.New(color.FgGreen).Add(color.Bold).Println("Summary:")
-	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
-	for _, epMetrics := range aggregatedMetrics {
-		totalRequests += epMetrics.Requests
-		totalErrors += epMetrics.Errors
-		totalDuration += epMetrics.TotalDuration
-	}
-	fmt.Printf("  Total Requests       : %d\n", totalRequests)
-	fmt.Printf("  Total Errors         : %d\n", totalErrors)
-	fmt.Printf("  Total Duration       : %v\n", totalDuration)
-	fmt.Printf("  Average Duration     : %v\n", totalDuration/time.Duration(totalRequests))
-	fmt.Println()
-}
-
-func roundDurationToTwoDecimals(d time.Duration) time.Duration {
-	// Convert duration to seconds as a float64
-	seconds := d.Seconds()
-
-	// Round to two decimal places
-	roundedSeconds := math.Round(seconds*100) / 100
-
-	// Convert back to time.Duration
-	return time.Duration(roundedSeconds * float64(time.Second))
-}
-
-func printDetailedReport(aggregatedMetrics map[string]*EndpointMetrics) {
-	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
-	t := tabby.New()
-	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
-	for key, epMetrics := range aggregatedMetrics {
-		statusCodes := make([]string, 0)
-		for code, count := range epMetrics.StatusCodeCounts {
-			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
-		}
-		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
-		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
-		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)), time.Duration(percentile50)*time.Millisecond, time.Duration(percentile95)*time.Millisecond, strings.Join(statusCodes, ", "))
-	}
-	t.Print()
-}
-
-func createConfigVM(content string) (*goja.Runtime, *Config, error) {
-	vm := goja.New()
-	config := &Config{}
-	groupWG := &sync.WaitGroup{}
-
-	vm.Set("console", createConsoleModule())
-	vm.Set("require", createRequireModule(config, nil, vm, groupWG)) // Pass the correct arguments
-
-	_, err := vm.RunScript("config.js", string(content))
-	if err != nil {
-		return nil, nil, fmt.Errorf("error running configuration script: %w", err)
-	}
-
-	return vm, config, nil
-}
-
-func esbuildTransform(src, filename string) (string, error) {
-	opts := api.TransformOptions{
-		Sourcefile:     filename,
-		Loader:         api.LoaderJS,
-		Target:         api.ESNext,
-		Format:         api.FormatIIFE, // Use IIFE to handle imports/exports
-		Sourcemap:      api.SourceMapExternal,
-		SourcesContent: api.SourcesContentInclude,
-		LegalComments:  api.LegalCommentsNone,
-		Platform:       api.PlatformNeutral,
-		LogLevel:       api.LogLevelSilent,
-		Charset:        api.CharsetUTF8,
-	}
-
-	result := api.Transform(src, opts)
-
-	if len(result.Errors) > 0 {
-		msg := result.Errors[0]
-		err := fmt.Errorf("esbuild error: %s", msg.Text)
-		if msg.Location != nil {
-			err = fmt.Errorf("esbuild error: %s at %s:%d:%d", msg.Text, msg.Location.File, msg.Location.Line, msg.Location.Column)
-		}
-		return "", err
-	}
-
-	return string(result.Code), nil
-}
-
-// LoadModule loads a JavaScript module from a file and transforms it using esbuild
-func LoadModule(runtime *goja.Runtime, modulePath string) (string, error) {
-	content, err := ioutil.ReadFile(modulePath)
-	if err != nil {
-		return "", err
-	}
-
-	code, err := esbuildTransform(string(content), modulePath)
-	if err != nil {
-		return "", err
-	}
-
-	// Log the transformed code
-	fmt.Printf("Transformed code for %s:\n%s\n", modulePath, code)
-
-	return code, err
 }
 
 func main() {
@@ -392,10 +424,18 @@ func main() {
 	result := api.Build(api.BuildOptions{
 		EntryPoints: []string{filePath},
 		Bundle:      true,
-		Write:       false,
-		Format:      api.FormatCommonJS,
-		Target:      api.ES2015,
-		External:    []string{"Accelira/http", "Accelira/assert", "Accelira/config", "Accelira/group"},
+		// Write:       false,
+		Format:   api.FormatCommonJS,
+		Platform: api.PlatformNeutral,
+		Target:   api.ES2015,
+		External: []string{
+			"Accelira/http",
+			"Accelira/assert",
+			"Accelira/config",
+			"Accelira/group",
+			"jsonwebtoken",
+			"crypto",
+			"fs"},
 	})
 
 	if len(result.Errors) > 0 {
@@ -415,10 +455,9 @@ func main() {
 	fmt.Printf("Iterations: %d\n", config.iterations)
 	fmt.Printf("Ramp-up Rate: %d\n", config.rampUpRate)
 
-	metricsChan := make(chan Metrics, 10000)
-	metricsList := make([]Metrics, 0)
+	metricsChan := make(chan report.Metrics, 10000)
+	metricsList := make([]report.Metrics, 0)
 	var mu sync.Mutex
-	groupWG := &sync.WaitGroup{}
 	metricsWG := &sync.WaitGroup{}
 
 	// Goroutine to process metrics
@@ -430,21 +469,19 @@ func main() {
 			mu.Unlock()
 		}
 	}()
-	metricsWG.Add(1) // Indicate that there is one goroutine processing metrics
-
+	metricsWG.Add(1)
 	// Run the scripts
 	wg := &sync.WaitGroup{}
 	for i := 0; i < config.concurrentUsers; i++ {
 		wg.Add(1)
-		go runScript(string(code), metricsChan, wg, config, groupWG)
+		go runScript(string(code), metricsChan, wg, config)
 		time.Sleep(time.Duration(1000/config.rampUpRate) * time.Millisecond)
 	}
 
 	wg.Wait()
-	groupWG.Wait()     // Ensure all groups have finished
 	close(metricsChan) // Safe to close the channel now
 
 	metricsWG.Wait() // Wait for the metrics processing to complete
 
-	generateReport(metricsList)
+	report.GenerateReport(metricsList)
 }

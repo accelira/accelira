@@ -7,6 +7,7 @@ require (
 	github.com/dop251/goja v0.0.0-20240806095544-3491d4a58fbe
 	github.com/evanw/esbuild v0.23.0
 	github.com/fatih/color v1.17.0
+	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/influxdata/tdigest v0.0.1
 )
 
