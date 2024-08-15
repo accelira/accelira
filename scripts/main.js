@@ -5,7 +5,7 @@ const group = require('Accelira/group');
 
 config.setIterations(2);
 config.setRampUpRate(2);
-config.setConcurrentUsers(10);
+config.setConcurrentUsers(20);
 
 
 group.start("All tested requests", function() {

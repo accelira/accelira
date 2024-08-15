@@ -51,15 +51,15 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- report.M
 	metrics := collectMetrics(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration)
 	sendMetrics(metrics, metricsChan)
 
-	if metricsChan != nil {
-		// Print the log in a sleek, color-coded format on the same line
-		fmt.Printf(
-			"\r\033[1;36m[\033[0m\033[1;34m%s\033[0m\033[1;36m]\033[0m \033[1;32m%s\033[0m - \033[1;31mStatus:\033[0m \033[1;31m%d\033[0m, \033[1;33mDuration:\033[0m \033[1;35m%v\033[0m",
-			method, url, resp.StatusCode, duration,
-		)
+	// if metricsChan != nil {
+	// 	// Print the log in a sleek, color-coded format on the same line
+	// 	fmt.Printf(
+	// 		"\r\033[1;36m[\033[0m\033[1;34m%s\033[0m\033[1;36m]\033[0m \033[1;32m%s\033[0m - \033[1;31mStatus:\033[0m \033[1;31m%d\033[0m, \033[1;33mDuration:\033[0m \033[1;35m%v\033[0m",
+	// 		method, url, resp.StatusCode, duration,
+	// 	)
 
-		// fmt.Print("\r\n") // Add a new line after the log for clarity
-	}
+	// 	// fmt.Print("\r\n") // Add a new line after the log for clarity
+	// }
 
 	return HttpResponse{Body: string(responseBody), StatusCode: resp.StatusCode}, nil
 }
@@ -401,6 +401,14 @@ func setupRequire(config *Config, metricsChan chan<- report.Metrics) func(module
 	}
 }
 
+func repeat(char rune, n int) string {
+	result := make([]rune, n)
+	for i := range result {
+		result[i] = char
+	}
+	return string(result)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide the JavaScript file path as an argument")
@@ -470,15 +478,29 @@ func main() {
 	metricsWG.Add(1)
 	// Run the scripts
 	wg := &sync.WaitGroup{}
+	progressWidth := 40
 	for i := 0; i < config.concurrentUsers; i++ {
+		percent := (i + 1) * 100 / config.concurrentUsers
+		filled := percent * progressWidth / 100
+		bar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
+			repeat('=', filled),
+			repeat(' ', progressWidth-filled),
+			percent,
+			i+1,
+			config.concurrentUsers,
+		)
+
+		fmt.Printf("\r%s", bar)
+		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
 		wg.Add(1)
 		go runScript(string(code), metricsChan, wg, config)
 		time.Sleep(time.Duration(1000/config.rampUpRate) * time.Millisecond)
+
 	}
 
 	wg.Wait()
 
-	fmt.Printf("\r\033[K")
+	// fmt.Printf("\r\033[K")
 	close(metricsChan) // Safe to close the channel now
 
 	metricsWG.Wait() // Wait for the metrics processing to complete
