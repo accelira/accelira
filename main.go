@@ -31,7 +31,6 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- report.M
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		sendEmptyMetrics(metricsChan)
 		return HttpResponse{}, err
 	}
 
@@ -39,14 +38,12 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- report.M
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		sendEmptyMetrics(metricsChan)
 		return HttpResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		sendEmptyMetrics(metricsChan)
 		return HttpResponse{}, err
 	}
 
@@ -54,17 +51,17 @@ func httpRequest(url, method string, body io.Reader, metricsChan chan<- report.M
 	metrics := collectMetrics(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration)
 	sendMetrics(metrics, metricsChan)
 
-	fmt.Printf("\r%s %s - Status: %d, Duration: %v", method, url, resp.StatusCode, duration)
+	if metricsChan != nil {
+		// Print the log in a sleek, color-coded format on the same line
+		fmt.Printf(
+			"\r\033[1;36m[\033[0m\033[1;34m%s\033[0m\033[1;36m]\033[0m \033[1;32m%s\033[0m - \033[1;31mStatus:\033[0m \033[1;31m%d\033[0m, \033[1;33mDuration:\033[0m \033[1;35m%v\033[0m",
+			method, url, resp.StatusCode, duration,
+		)
+
+		// fmt.Print("\r\n") // Add a new line after the log for clarity
+	}
 
 	return HttpResponse{Body: string(responseBody), StatusCode: resp.StatusCode}, nil
-}
-
-func sendEmptyMetrics(metricsChan chan<- report.Metrics) {
-	select {
-	case metricsChan <- report.Metrics{EndpointMetricsMap: map[string]*report.EndpointMetrics{}}:
-	default:
-		fmt.Println("Channel is full, dropping metrics")
-	}
 }
 
 func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int, duration time.Duration) report.Metrics {
@@ -88,10 +85,12 @@ func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int
 }
 
 func sendMetrics(metrics report.Metrics, metricsChan chan<- report.Metrics) {
-	select {
-	case metricsChan <- metrics:
-	default:
-		fmt.Println("Channel is full, dropping metrics")
+	if metricsChan != nil {
+		select {
+		case metricsChan <- metrics:
+		default:
+			fmt.Println("Channel is full, dropping metrics")
+		}
 	}
 }
 
@@ -297,30 +296,18 @@ func setupRequire(config *Config, metricsChan chan<- report.Metrics) func(module
 		case "Accelira/http":
 			return map[string]interface{}{
 				"get": func(url string) (map[string]interface{}, error) {
-					if metricsChan == nil {
-						return nil, nil
-					}
 					resp, err := httpRequest(url, "GET", nil, metricsChan)
 					return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 				},
 				"post": func(url string, body string) (map[string]interface{}, error) {
-					if metricsChan == nil {
-						return nil, nil
-					}
 					resp, err := httpRequest(url, "POST", strings.NewReader(body), metricsChan)
 					return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 				},
 				"put": func(url string, body string) (map[string]interface{}, error) {
-					if metricsChan == nil {
-						return nil, nil
-					}
 					resp, err := httpRequest(url, "PUT", strings.NewReader(body), metricsChan)
 					return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 				},
 				"delete": func(url string) (map[string]interface{}, error) {
-					if metricsChan == nil {
-						return nil, nil
-					}
 					resp, err := httpRequest(url, "DELETE", nil, metricsChan)
 					return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
 				},
@@ -419,6 +406,17 @@ func main() {
 		fmt.Println("Please provide the JavaScript file path as an argument")
 		return
 	}
+	logo := `
++===================================+
+|    _                _ _           |
+|   / \   ___ ___ ___| (_)_ __ __ _ |
+|  / _ \ / __/ __/ _ \ | | '__/ _` + "`" + ` ||
+| / ___ \ (_| (_|  __/ | | | | (_| ||
+|/_/   \_\___\___\___|_|_|_|  \__,_||
++===================================+
+`
+
+	fmt.Print(logo)
 
 	filePath := os.Args[1]
 	result := api.Build(api.BuildOptions{
@@ -479,6 +477,8 @@ func main() {
 	}
 
 	wg.Wait()
+
+	fmt.Printf("\r\033[K")
 	close(metricsChan) // Safe to close the channel now
 
 	metricsWG.Wait() // Wait for the metrics processing to complete
