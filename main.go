@@ -19,6 +19,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/influxdata/tdigest"
+	"github.com/spf13/cobra"
 )
 
 type HttpResponse struct {
@@ -410,11 +411,20 @@ func repeat(char rune, n int) string {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Please provide the JavaScript file path as an argument")
-		return
+	var rootCmd = &cobra.Command{
+		Use:   "accelira",
+		Short: "Accelira performance testing tool",
 	}
-	logo := `
+
+	var runCmd = &cobra.Command{
+		Use:   "run [script]",
+		Short: "Run a JavaScript test script",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			scriptPath := args[0]
+
+			// Display logo
+			logo := `
 +===================================+
 |    _                _ _           |
 |   / \   ___ ___ ___| (_)_ __ __ _ |
@@ -423,87 +433,93 @@ func main() {
 |/_/   \_\___\___\___|_|_|_|  \__,_||
 +===================================+
 `
+			fmt.Print(logo)
 
-	fmt.Print(logo)
+			// Build the JavaScript code
+			result := api.Build(api.BuildOptions{
+				EntryPoints: []string{scriptPath},
+				Bundle:      true,
+				Format:      api.FormatCommonJS,
+				Platform:    api.PlatformNeutral,
+				Target:      api.ES2015,
+				External: []string{
+					"Accelira/http",
+					"Accelira/assert",
+					"Accelira/config",
+					"Accelira/group",
+					"jsonwebtoken",
+					"crypto",
+					"fs"},
+			})
 
-	filePath := os.Args[1]
-	result := api.Build(api.BuildOptions{
-		EntryPoints: []string{filePath},
-		Bundle:      true,
-		// Write:       false,
-		Format:   api.FormatCommonJS,
-		Platform: api.PlatformNeutral,
-		Target:   api.ES2015,
-		External: []string{
-			"Accelira/http",
-			"Accelira/assert",
-			"Accelira/config",
-			"Accelira/group",
-			"jsonwebtoken",
-			"crypto",
-			"fs"},
-	})
+			if len(result.Errors) > 0 {
+				log.Fatalf("esbuild errors: %v", result.Errors)
+			}
 
-	if len(result.Errors) > 0 {
-		log.Fatalf("esbuild errors: %v", result.Errors)
+			// Get the bundled code
+			code := string(result.OutputFiles[0].Contents)
+
+			// Create and configure VM
+			_, config, err := createConfigVM(code)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+
+			fmt.Printf("Concurrent Users: %d\n", config.concurrentUsers)
+			fmt.Printf("Iterations: %d\n", config.iterations)
+			fmt.Printf("Ramp-up Rate: %d\n", config.rampUpRate)
+
+			metricsChan := make(chan report.Metrics, 10000)
+			var metricsList []report.Metrics
+			var mu sync.Mutex
+			var metricsWG sync.WaitGroup
+
+			// Goroutine to process metrics
+			go func() {
+				defer metricsWG.Done()
+				for metrics := range metricsChan {
+					mu.Lock()
+					metricsList = append(metricsList, metrics)
+					mu.Unlock()
+				}
+			}()
+			metricsWG.Add(1)
+
+			// Run the scripts
+			var wg sync.WaitGroup
+			progressWidth := 40
+			for i := 0; i < config.concurrentUsers; i++ {
+				percent := (i + 1) * 100 / config.concurrentUsers
+				filled := percent * progressWidth / 100
+				bar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
+					repeat('=', filled),
+					repeat(' ', progressWidth-filled),
+					percent,
+					i+1,
+					config.concurrentUsers,
+				)
+
+				fmt.Printf("\r%s", bar)
+				os.Stdout.Sync() // Ensure the progress bar is flushed to the output
+				wg.Add(1)
+				go runScript(code, metricsChan, &wg, config)
+				time.Sleep(time.Duration(1000/config.rampUpRate) * time.Millisecond)
+			}
+
+			wg.Wait()
+
+			close(metricsChan)
+			metricsWG.Wait()
+
+			report.GenerateReport(metricsList)
+		},
 	}
 
-	// Get the bundled code
-	code := string(result.OutputFiles[0].Contents)
+	rootCmd.AddCommand(runCmd)
 
-	_, config, err := createConfigVM(string(code))
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
-		return
+		os.Exit(1)
 	}
-
-	fmt.Printf("Concurrent Users: %d\n", config.concurrentUsers)
-	fmt.Printf("Iterations: %d\n", config.iterations)
-	fmt.Printf("Ramp-up Rate: %d\n", config.rampUpRate)
-
-	metricsChan := make(chan report.Metrics, 10000)
-	metricsList := make([]report.Metrics, 0)
-	var mu sync.Mutex
-	metricsWG := &sync.WaitGroup{}
-
-	// Goroutine to process metrics
-	go func() {
-		defer metricsWG.Done() // Mark the metrics processing as done when the goroutine exits
-		for metrics := range metricsChan {
-			mu.Lock()
-			metricsList = append(metricsList, metrics)
-			mu.Unlock()
-		}
-	}()
-	metricsWG.Add(1)
-	// Run the scripts
-	wg := &sync.WaitGroup{}
-	progressWidth := 40
-	for i := 0; i < config.concurrentUsers; i++ {
-		percent := (i + 1) * 100 / config.concurrentUsers
-		filled := percent * progressWidth / 100
-		bar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
-			repeat('=', filled),
-			repeat(' ', progressWidth-filled),
-			percent,
-			i+1,
-			config.concurrentUsers,
-		)
-
-		fmt.Printf("\r%s", bar)
-		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
-		wg.Add(1)
-		go runScript(string(code), metricsChan, wg, config)
-		time.Sleep(time.Duration(1000/config.rampUpRate) * time.Millisecond)
-
-	}
-
-	wg.Wait()
-
-	// fmt.Printf("\r\033[K")
-	close(metricsChan) // Safe to close the channel now
-
-	metricsWG.Wait() // Wait for the metrics processing to complete
-
-	report.GenerateReport(metricsList)
 }
