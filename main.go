@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"
 	"github.com/accelira/accelira/report"
 	"github.com/dop251/goja"
@@ -24,7 +25,7 @@ type HttpResponse struct {
 	StatusCode int
 }
 
-func runScript(script string, metricsChan chan<- report.Metrics, wg *sync.WaitGroup, config *moduleloader.Config) {
+func runScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config) {
 	defer wg.Done()
 
 	vm := goja.New()
@@ -240,8 +241,8 @@ func main() {
 			fmt.Printf("Iterations: %d\n", config.Iterations)
 			fmt.Printf("Ramp-up Rate: %d\n", config.RampUpRate)
 
-			metricsChan := make(chan report.Metrics, 10000)
-			var metricsList []report.Metrics
+			metricsChan := make(chan metrics.Metrics, 10000)
+			var metricsList []metrics.Metrics
 			var mu sync.Mutex
 			var metricsWG sync.WaitGroup
 

@@ -6,64 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/accelira/accelira/metrics"
 	"github.com/cheynewallace/tabby"
 	"github.com/fatih/color"
-	"github.com/influxdata/tdigest"
 )
 
-type Metrics struct {
-	EndpointMetricsMap map[string]*EndpointMetrics
-}
-
-type EndpointMetrics struct {
-	URL                string
-	Method             string
-	Requests           int
-	TotalDuration      time.Duration
-	TotalResponseTime  time.Duration
-	TotalBytesReceived int
-	TotalBytesSent     int
-	Errors             int
-	StatusCodeCounts   map[int]int
-	ResponseTimes      *tdigest.TDigest
-}
-
-func GenerateReport(metricsList []Metrics) {
-	aggregatedMetrics := aggregateMetrics(metricsList)
+func GenerateReport(metricsList []metrics.Metrics) {
+	aggregatedMetrics := metrics.AggregateMetrics(metricsList)
 	printSummary(aggregatedMetrics)
 	printDetailedReport(aggregatedMetrics)
 }
 
-func aggregateMetrics(metricsList []Metrics) map[string]*EndpointMetrics {
-	aggregatedMetrics := make(map[string]*EndpointMetrics)
-	for _, metrics := range metricsList {
-		for key, epMetrics := range metrics.EndpointMetricsMap {
-			if _, exists := aggregatedMetrics[key]; !exists {
-				aggregatedMetrics[key] = &EndpointMetrics{
-					StatusCodeCounts: make(map[int]int),
-					ResponseTimes:    tdigest.New(),
-				}
-			}
-			mergeEndpointMetrics(aggregatedMetrics[key], epMetrics)
-		}
-	}
-	return aggregatedMetrics
-}
-
-func mergeEndpointMetrics(dest, src *EndpointMetrics) {
-	dest.Requests += src.Requests
-	dest.TotalDuration += src.TotalDuration
-	dest.TotalResponseTime += src.TotalResponseTime
-	dest.TotalBytesReceived += src.TotalBytesReceived
-	dest.TotalBytesSent += src.TotalBytesSent
-	dest.Errors += src.Errors
-	dest.ResponseTimes.Add(src.ResponseTimes.Quantile(0.5), 1)
-	for code, count := range src.StatusCodeCounts {
-		dest.StatusCodeCounts[code] += count
-	}
-}
-
-func printSummary(aggregatedMetrics map[string]*EndpointMetrics) {
+func printSummary(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
 	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
 	color.New(color.FgGreen).Add(color.Bold).Println("Summary:")
 	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
@@ -90,7 +44,7 @@ func roundDurationToTwoDecimals(d time.Duration) time.Duration {
 	return time.Duration(roundedSeconds * float64(time.Second))
 }
 
-func printDetailedReport(aggregatedMetrics map[string]*EndpointMetrics) {
+func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
 	t := tabby.New()
 	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
