@@ -1,7 +1,6 @@
 # Accelira
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/accelira/accelira)
-![GitHub](https://img.shields.io/github/license/accelira/accelira)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/accelira/accelira/ci.yml)
 ![GitHub issues](https://img.shields.io/github/issues/accelira/accelira)
 ![GitHub pull requests](https://img.shields.io/github/issues-pr/accelira/accelira)
