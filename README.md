@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/accelira/accelira/blob/main/images/logo.png?raw=true" alt="Accelira Logo" width="100" height="100"/>
+</p>
+
 # Accelira
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/accelira/accelira)
