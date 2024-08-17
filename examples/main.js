@@ -14,8 +14,7 @@ module.exports = function () {
         const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
         const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
 
-        const getResponse = http.get(getUrl);
-        assert.equal(getResponse.status, 200);
+        const getResponse = http.get(getUrl).ass
 
         const postResponse = http.post(postUrl, JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
         assert.equal(postResponse.status, 201);

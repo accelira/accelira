@@ -141,7 +141,9 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 
 		waitGroup.Add(1)
 		go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
-		time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
+		if config.RampUpRate > 0 {
+			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
+		}
 	}
 
 	waitGroup.Wait()
