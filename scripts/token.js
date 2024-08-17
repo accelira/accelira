@@ -9,39 +9,44 @@ import group from "Accelira/group";
 
 
 
-// Load the private key
-const privateKey = fs.readFileSync('./private.key', 'utf8');
-
-// Define the payload
-const payload = {
-    sub: '1234567890',
-    name: 'John Doe',
-    admin: true
-};
-
-// Define the options
-const signOptions = {
-    algorithm: 'RS256',
-    expiresIn: '1h'
-};
-
-// Generate the token
-const token = jwt.sign(payload, privateKey, signOptions);
-
-// Output the token
-// console.log(token);
-
 
 
 config.setIterations(options.iterations);
 config.setRampUpRate(options.rampUpRate);
 config.setConcurrentUsers(options.concurrentUsers);
 
-group.start("get request", function () {
+export default function () {
 
-    const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
+    group.start("get request", function () {
 
-    const getResponse = http.get(getUrl);
-    assert.equal(getResponse.status, 200);
+        // Load the private key
+        const privateKey = fs.readFileSync('./private.key', 'utf8');
 
-})
+        // Define the payload
+        const payload = {
+            sub: '1234567890',
+            name: 'John Doe',
+            admin: true
+        };
+
+        // Define the options
+        const signOptions = {
+            algorithm: 'RS256',
+            expiresIn: '1h'
+        };
+
+        // Generate the token
+        const token = jwt.sign(payload, privateKey, signOptions);
+
+        // Output the token
+        // console.log(token);
+
+
+        const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
+
+        const getResponse = http.get(getUrl);
+        assert.equal(getResponse.status, 300);
+
+    })
+
+}

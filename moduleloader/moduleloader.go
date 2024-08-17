@@ -56,21 +56,37 @@ func SetupRequire(config *Config, metricsChan chan<- metrics.Metrics) func(modul
 // createHTTPModule handles HTTP requests (GET, POST, PUT, DELETE) and sends metrics.
 func createHTTPModule(metricsChan chan<- metrics.Metrics) map[string]interface{} {
 	return map[string]interface{}{
-		"get": func(url string) (map[string]interface{}, error) {
+		"get": func(url string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "GET", nil, metricsChan)
-			return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			return createResponseObject(resp, err)
 		},
-		"post": func(url string, body string) (map[string]interface{}, error) {
+		"post": func(url string, body string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "POST", strings.NewReader(body), metricsChan)
-			return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			return createResponseObject(resp, err)
 		},
-		"put": func(url string, body string) (map[string]interface{}, error) {
+		"put": func(url string, body string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "PUT", strings.NewReader(body), metricsChan)
-			return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			return createResponseObject(resp, err)
 		},
-		"delete": func(url string) (map[string]interface{}, error) {
+		"delete": func(url string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "DELETE", nil, metricsChan)
-			return map[string]interface{}{"body": resp.Body, "status": resp.StatusCode}, err
+			return createResponseObject(resp, err)
+		},
+	}
+}
+
+func createResponseObject(resp httpclient.HttpResponse, err error) map[string]interface{} {
+	return map[string]interface{}{
+		"response": resp,
+		"error":    err,
+		"assertStatus": func(expectedStatus int) map[string]interface{} {
+			if resp.StatusCode != expectedStatus {
+				panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
+			}
+			return map[string]interface{}{
+				"response": resp,
+				"error":    err,
+			}
 		},
 	}
 }

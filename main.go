@@ -14,16 +14,12 @@ import (
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"
 	"github.com/accelira/accelira/report"
+	"github.com/accelira/accelira/util"
 	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/cobra"
 )
-
-type HttpResponse struct {
-	Body       string
-	StatusCode int
-}
 
 func runScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config) {
 	defer wg.Done()
@@ -33,14 +29,18 @@ func runScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitG
 	setupCryptoModule(vm)
 	setupJsonWebTokenModule(vm)
 	setupConsoleModule(vm)
+	module := initializeModule(vm)
 	vm.Set("require", moduleloader.SetupRequire(config, metricsChan))
+
+	_, err := vm.RunScript("script.js", fmt.Sprintf("(function() { %s })();", script))
+	if err != nil {
+		fmt.Println("Error running script:", err)
+	}
 
 	iterations := config.Iterations
 	for i := 0; i < iterations; i++ {
-		_, err := vm.RunScript("script.js", fmt.Sprintf("(function() { %s })();", script))
-		if err != nil {
-			fmt.Println("Error running script:", err)
-		}
+		// Execute the default exported function
+		executeExportedFunction(vm, module)
 	}
 }
 
@@ -51,6 +51,7 @@ func createConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error)
 	setupCryptoModule(vm)
 	setupJsonWebTokenModule(vm)
 	setupConsoleModule(vm)
+	initializeModule(vm)
 
 	vm.Set("require", moduleloader.SetupRequire(config, nil)) // Pass the correct arguments
 
@@ -60,6 +61,41 @@ func createConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error)
 	}
 
 	return vm, config, nil
+}
+
+func initializeModule(vm *goja.Runtime) *goja.Object {
+	module := vm.NewObject()
+	exports := vm.NewObject()
+	module.Set("exports", exports)
+
+	vm.Set("module", module)
+	vm.Set("exports", exports)
+	return module
+}
+
+// executeExportedFunction determines the export style and executes the function
+func executeExportedFunction(vm *goja.Runtime, module *goja.Object) {
+	moduleExports := module.Get("exports")
+
+	if fn, ok := goja.AssertFunction(moduleExports); ok {
+		// CommonJS style: module.exports = function() { ... }
+		executeFunction(vm, fn)
+	} else if defaultExport := moduleExports.ToObject(vm).Get("default"); defaultExport != nil {
+		if fn, ok := goja.AssertFunction(defaultExport); ok {
+			// ES6 style: export default function() { ... }
+			executeFunction(vm, fn)
+		}
+	} else {
+		log.Println("No executable export found.")
+	}
+}
+
+// executeFunction safely executes a Goja function
+func executeFunction(vm *goja.Runtime, fn goja.Callable) {
+	_, err := fn(goja.Undefined(), vm.ToValue(nil))
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 // Setup fs module for Goja
@@ -173,14 +209,6 @@ func base64Encode(data []byte) string {
 	return base64.StdEncoding.EncodeToString(data)
 }
 
-func repeat(char rune, n int) string {
-	result := make([]rune, n)
-	for i := range result {
-		result[i] = char
-	}
-	return string(result)
-}
-
 func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "accelira",
@@ -264,8 +292,8 @@ func main() {
 				percent := (i + 1) * 100 / config.ConcurrentUsers
 				filled := percent * progressWidth / 100
 				bar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
-					repeat('=', filled),
-					repeat(' ', progressWidth-filled),
+					util.Repeat('=', filled),
+					util.Repeat(' ', progressWidth-filled),
 					percent,
 					i+1,
 					config.ConcurrentUsers,
