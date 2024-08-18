@@ -34,14 +34,20 @@ jobs:
     - name: Install dependencies
       run: go mod tidy
 
-    - name: Build
-      run: go build -v -o accelira .
+    - name: Build and Package
+      run: ./build_and_package.sh
+
+    - name: Upload Tarball
+      uses: actions/upload-artifact@v2
+      with:
+        name: accelira
+        path: *.tar.gz
 
     - name: Archive build
       uses: actions/upload-artifact@v2
       with:
         name: accelira
-        path: accelira
+        path: build/accelira
 
   release:
     runs-on: ubuntu-latest
