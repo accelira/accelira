@@ -122,9 +122,43 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsList *[]metrics
 	}
 }
 
+// func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
+// 	var waitGroup sync.WaitGroup
+// 	progressBarWidth := 40
+// 	for i := 0; i < config.ConcurrentUsers; i++ {
+// 		percentage := (i + 1) * 100 / config.ConcurrentUsers
+// 		filledWidth := percentage * progressBarWidth / 100
+// 		progressBar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
+// 			util.Repeat('=', filledWidth),
+// 			util.Repeat(' ', progressBarWidth-filledWidth),
+// 			percentage,
+// 			i+1,
+// 			config.ConcurrentUsers,
+// 		)
+
+// 		fmt.Printf("\r%s", progressBar)
+// 		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
+
+// 		waitGroup.Add(1)
+// 		go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
+// 		if config.RampUpRate > 0 {
+// 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
+// 		}
+// 	}
+
+// 	waitGroup.Wait()
+// }
+
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
 	var waitGroup sync.WaitGroup
 	progressBarWidth := 40
+
+	// Initialize VM pool
+	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
+	if err != nil {
+		log.Fatalf("Error initializing VM pool: %v", err)
+	}
+
 	for i := 0; i < config.ConcurrentUsers; i++ {
 		percentage := (i + 1) * 100 / config.ConcurrentUsers
 		filledWidth := percentage * progressBarWidth / 100
@@ -140,7 +174,8 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
 
 		waitGroup.Add(1)
-		go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
+		// go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
+		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
 		if config.RampUpRate > 0 {
 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
 		}
