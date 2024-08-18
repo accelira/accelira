@@ -35,7 +35,7 @@ jobs:
       run: go mod tidy
 
     - name: Build
-      run: go build -v -o accelira ./...
+      run: go build -v -o accelira .
 
     - name: Archive build
       uses: actions/upload-artifact@v2
