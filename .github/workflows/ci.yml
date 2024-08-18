@@ -41,7 +41,7 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: accelira
-        path: *.tar.gz
+        path: "*.tar.gz"
 
     - name: Archive build
       uses: actions/upload-artifact@v2
