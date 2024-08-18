@@ -1,6 +1,6 @@
 module github.com/accelira/accelira
 
-go 1.22.1
+go 1.22
 
 require (
 	github.com/cheynewallace/tabby v1.1.1
