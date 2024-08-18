@@ -45,6 +45,12 @@ func SetupRequire(config *Config, metricsChan chan<- metrics.Metrics) func(modul
 			return createGroupModule(metricsChan)
 		case "Accelira/assert":
 			return createAssertModule()
+		case "fs":
+			return createFSModule()
+		case "crypto":
+			return createCryptoModule()
+		case "jsonwebtoken":
+			return createJsonWebTokenModule()
 		}
 		return nil
 	}
@@ -120,8 +126,8 @@ func createAssertModule() map[string]interface{} {
 }
 
 // createFSModule provides basic file system operations.
-func SetupFSModule(vm *goja.Runtime) {
-	vm.Set("fs", map[string]interface{}{
+func createFSModule() map[string]interface{} {
+	return map[string]interface{}{
 		"readFileSync": func(filename string, encoding string) string {
 			data, err := os.ReadFile(filename)
 			if err != nil {
@@ -129,102 +135,47 @@ func SetupFSModule(vm *goja.Runtime) {
 			}
 			return string(data)
 		},
-	})
+	}
 }
 
 // createCryptoModule provides cryptographic operations such as random bytes generation, hashing, and HMAC.
-func SetupCryptoModule(vm *goja.Runtime) {
-	crypto := vm.NewObject()
-
-	crypto.Set("randomBytes", func(call goja.FunctionCall) goja.Value {
-		size := call.Argument(0).ToInteger()
-		bytes := make([]byte, size)
-		_, err := rand.Read(bytes)
-		if err != nil {
-			return vm.ToValue(nil)
-		}
-		return vm.ToValue(bytes)
-	})
-
-	crypto.Set("createHash", func(call goja.FunctionCall) goja.Value {
-		hash := sha256.New()
-		return vm.ToValue(map[string]interface{}{
-			"update": func(data string) {
-				hash.Write([]byte(data))
-			},
-			"digest": func(encoding string) string {
-				return util.Base64Encode(hash.Sum(nil))
-			},
-		})
-	})
-
-	crypto.Set("createHmac", func(call goja.FunctionCall) goja.Value {
-		key := call.Argument(1).String()
-		h := hmac.New(sha256.New, []byte(key))
-		return vm.ToValue(map[string]interface{}{
-			"update": func(data string) {
-				h.Write([]byte(data))
-			},
-			"digest": func(encoding string) string {
-				return util.Base64Encode(h.Sum(nil))
-			},
-		})
-	})
-
-	vm.Set("crypto", crypto)
+func createCryptoModule() map[string]interface{} {
+	return map[string]interface{}{
+		"randomBytes": func(size int) []byte {
+			bytes := make([]byte, size)
+			_, err := rand.Read(bytes)
+			if err != nil {
+				return nil
+			}
+			return bytes
+		},
+		"createHash": func(algorithm string) map[string]interface{} {
+			hash := sha256.New()
+			return map[string]interface{}{
+				"update": func(data string) {
+					hash.Write([]byte(data))
+				},
+				"digest": func(encoding string) string {
+					return util.Base64Encode(hash.Sum(nil))
+				},
+			}
+		},
+		"createHmac": func(algorithm string, key string) map[string]interface{} {
+			h := hmac.New(sha256.New, []byte(key))
+			return map[string]interface{}{
+				"update": func(data string) {
+					h.Write([]byte(data))
+				},
+				"digest": func(encoding string) string {
+					return util.Base64Encode(h.Sum(nil))
+				},
+			}
+		},
+	}
 }
 
-// createFSModule provides basic file system operations.
-// func createFSModule() map[string]interface{} {
-// 	return map[string]interface{}{
-// 		"readFileSync": func(filename string, encoding string) string {
-// 			data, err := os.ReadFile(filename)
-// 			if err != nil {
-// 				return fmt.Sprintf("Error: %v", err)
-// 			}
-// 			return string(data)
-// 		},
-// 	}
-// }
-
-// createCryptoModule provides cryptographic operations such as random bytes generation, hashing, and HMAC.
-// func createCryptoModule() map[string]interface{} {
-// 	return map[string]interface{}{
-// 		"randomBytes": func(size int) []byte {
-// 			bytes := make([]byte, size)
-// 			_, err := rand.Read(bytes)
-// 			if err != nil {
-// 				return nil
-// 			}
-// 			return bytes
-// 		},
-// 		"createHash": func(algorithm string) map[string]interface{} {
-// 			hash := sha256.New()
-// 			return map[string]interface{}{
-// 				"update": func(data string) {
-// 					hash.Write([]byte(data))
-// 				},
-// 				"digest": func(encoding string) string {
-// 					return util.Base64Encode(hash.Sum(nil))
-// 				},
-// 			}
-// 		},
-// 		"createHmac": func(algorithm string, key string) map[string]interface{} {
-// 			h := hmac.New(sha256.New, []byte(key))
-// 			return map[string]interface{}{
-// 				"update": func(data string) {
-// 					h.Write([]byte(data))
-// 				},
-// 				"digest": func(encoding string) string {
-// 					return util.Base64Encode(h.Sum(nil))
-// 				},
-// 			}
-// 		},
-// 	}
-// }
-
-func SetupJsonWebTokenModule(vm *goja.Runtime) {
-	vm.Set("jsonwebtoken", map[string]interface{}{
+func createJsonWebTokenModule() map[string]interface{} {
+	return map[string]interface{}{
 		"sign": func(payload map[string]interface{}, privateKey string, options map[string]interface{}) (string, error) {
 			// Validate the key
 			if len(privateKey) == 0 {
@@ -245,7 +196,7 @@ func SetupJsonWebTokenModule(vm *goja.Runtime) {
 			}
 			return tokenString, nil
 		},
-	})
+	}
 }
 
 // Setup console module for Goja

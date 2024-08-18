@@ -4,12 +4,7 @@ import jwt from 'jsonwebtoken';
 import config from "Accelira/config";
 import { options } from './options.js';
 import http from "Accelira/http";
-import assert from "Accelira/assert";
 import group from "Accelira/group";
-
-
-
-
 
 config.setIterations(options.iterations);
 config.setRampUpRate(options.rampUpRate);
@@ -44,8 +39,7 @@ export default function () {
 
         const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
 
-        const getResponse = http.get(getUrl);
-        assert.equal(getResponse.status, 300);
+        const getResponse = http.get(getUrl).assertStatus(200)
 
     })
 

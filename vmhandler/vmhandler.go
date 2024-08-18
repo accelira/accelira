@@ -13,9 +13,6 @@ func RunScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitG
 	defer wg.Done()
 
 	vm := goja.New()
-	moduleloader.SetupFSModule(vm)
-	moduleloader.SetupCryptoModule(vm)
-	moduleloader.SetupJsonWebTokenModule(vm)
 	moduleloader.SetupConsoleModule(vm)
 	module := moduleloader.InitializeModuleExport(vm)
 	vm.Set("require", moduleloader.SetupRequire(config, metricsChan))
@@ -35,9 +32,6 @@ func RunScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitG
 func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error) {
 	vm := goja.New()
 	config := &moduleloader.Config{}
-	moduleloader.SetupFSModule(vm)
-	moduleloader.SetupCryptoModule(vm)
-	moduleloader.SetupJsonWebTokenModule(vm)
 	moduleloader.SetupConsoleModule(vm)
 	_ = moduleloader.InitializeModuleExport(vm)
 
