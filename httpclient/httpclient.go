@@ -18,7 +18,7 @@ type HttpResponse struct {
 	Duration   time.Duration
 }
 
-func HttpRequest(url, method string, body io.Reader, metricsChan chan<- metrics.Metrics) (HttpResponse, error) {
+func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
 	start := time.Now()
 
 	req, err := http.NewRequest(method, url, body)
@@ -41,7 +41,7 @@ func HttpRequest(url, method string, body io.Reader, metricsChan chan<- metrics.
 
 	duration := time.Since(start)
 	metrics := collectMetrics(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration)
-	sendMetrics(metrics, metricsChan)
+	sendMetrics(metrics, metricsChannel)
 
 	return HttpResponse{
 		Body:       string(responseBody),
