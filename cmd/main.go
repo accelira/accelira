@@ -36,7 +36,6 @@ func main() {
 	}
 
 	printMemoryUsage()
-	printCPUUsage()
 }
 
 func printMemoryUsage() {
@@ -47,14 +46,6 @@ func printMemoryUsage() {
 
 func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
-}
-
-func printCPUUsage() {
-	fmt.Printf("Number of Goroutines: %d\n", runtime.NumGoroutine())
-	userTime := time.Now()
-	for i := 0; i < 1000000000; i++ {
-	}
-	fmt.Printf("Elapsed CPU Time: %s\n", time.Since(userTime))
 }
 
 func executeScript(cmd *cobra.Command, args []string) {
