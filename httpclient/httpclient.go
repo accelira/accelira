@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/accelira/accelira/metrics"
-	"github.com/influxdata/tdigest"
 )
 
 type HttpResponse struct {
@@ -41,7 +40,15 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	transport := &http.Transport{
+		DisableKeepAlives: false,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return HttpResponse{}, err
 	}
@@ -96,20 +103,20 @@ func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, s
 		URL:                 url,
 		Method:              method,
 		StatusCodeCounts:    make(map[int]int),
-		ResponseTimes:       tdigest.New(),
-		TCPHandshakeLatency: tdigest.New(),
-		DNSLookupLatency:    tdigest.New(),
+		ResponseTimes:       0,
+		TCPHandshakeLatency: 0,
+		DNSLookupLatency:    0,
 	}
 
-	epMetrics.Requests++
-	epMetrics.TotalDuration += duration
-	epMetrics.TotalResponseTime += duration
-	epMetrics.TotalBytesReceived += bytesReceived
-	epMetrics.TotalBytesSent += bytesSent
-	epMetrics.StatusCodeCounts[statusCode]++
-	epMetrics.ResponseTimes.Add(float64(duration.Milliseconds()), 1)
-	epMetrics.TCPHandshakeLatency.Add(float64(tcpHandshakeLatency.Milliseconds()), 1)
-	epMetrics.DNSLookupLatency.Add(float64(dnsLookupLatency.Milliseconds()), 1)
+	epMetrics.Requests = 1
+	epMetrics.TotalDuration = duration
+	epMetrics.TotalResponseTime = duration
+	epMetrics.TotalBytesReceived = bytesReceived
+	epMetrics.TotalBytesSent = bytesSent
+	epMetrics.StatusCodeCounts[statusCode] = 1
+	epMetrics.ResponseTimes = duration
+	epMetrics.TCPHandshakeLatency = tcpHandshakeLatency
+	epMetrics.DNSLookupLatency = dnsLookupLatency
 
 	return metrics.Metrics{EndpointMetricsMap: map[string]*metrics.EndpointMetrics{key: epMetrics}}
 }

@@ -102,6 +102,7 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 		"assertStatus": func(expectedStatus int) map[string]interface{} {
 			if resp.StatusCode != expectedStatus {
 				// Send metrics for failed assertion
+
 				metricsData := metrics.Metrics{
 					EndpointMetricsMap: map[string]*metrics.EndpointMetrics{
 						fmt.Sprintf("%s %s", resp.Method, resp.URL): {
