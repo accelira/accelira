@@ -19,29 +19,36 @@ import (
 )
 
 func main() {
-	rootCommand := &cobra.Command{
+	rootCmd := createRootCommand()
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+	printMemoryUsage()
+}
+
+func createRootCommand() *cobra.Command {
+	rootCmd := &cobra.Command{
 		Use:   "accelira",
 		Short: "Accelira performance testing tool",
 	}
-	runCommand := &cobra.Command{
+	rootCmd.AddCommand(createRunCommand())
+	return rootCmd
+}
+
+func createRunCommand() *cobra.Command {
+	return &cobra.Command{
 		Use:   "run [script]",
 		Short: "Run a JavaScript test script",
 		Args:  cobra.ExactArgs(1),
 		Run:   executeScript,
 	}
-	rootCommand.AddCommand(runCommand)
-
-	if err := rootCommand.Execute(); err != nil {
-		log.Fatalf("Command execution failed: %v", err)
-	}
-
-	printMemoryUsage()
 }
 
 func printMemoryUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	fmt.Printf("\nAlloc = %v MiB\tTotalAlloc = %v MiB\tSys = %v MiB\tNumGC = %v\n", bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC)
+	fmt.Printf("\nAlloc = %v MiB\tTotalAlloc = %v MiB\tSys = %v MiB\tNumGC = %v\n",
+		bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC)
 }
 
 func bToMb(b uint64) uint64 {
@@ -50,24 +57,21 @@ func bToMb(b uint64) uint64 {
 
 func executeScript(cmd *cobra.Command, args []string) {
 	util.DisplayLogo()
+
 	builtCode, err := buildJavaScriptCode(args[0])
-	if err != nil {
-		log.Fatalf("Error building JavaScript: %v", err)
-	}
+	checkError("Error building JavaScript", err)
 
 	vmConfig, err := setupVM(builtCode)
-	if err != nil {
-		log.Fatalf("Error setting up VM: %v", err)
-	}
+	checkError("Error setting up VM", err)
 
 	displayConfig(vmConfig)
+
 	metricsChannel := make(chan metrics.Metrics, 1000)
 	metricsMap := make(map[string]*metrics.EndpointMetrics)
 	var metricsMutex sync.Mutex
 	var metricsWaitGroup sync.WaitGroup
 
-	go gatherMetrics(metricsChannel, metricsMap, &metricsMutex, &metricsWaitGroup)
-	metricsWaitGroup.Add(1)
+	startMetricsCollection(metricsChannel, metricsMap, &metricsMutex, &metricsWaitGroup)
 
 	executeTestScripts(builtCode, vmConfig, metricsChannel)
 
@@ -105,6 +109,11 @@ func setupVM(code string) (*moduleloader.Config, error) {
 	return config, nil
 }
 
+func startMetricsCollection(metricsChannel chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
+	metricsWaitGroup.Add(1)
+	go gatherMetrics(metricsChannel, metricsMap, metricsMutex, metricsWaitGroup)
+}
+
 func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
 	defer metricsWaitGroup.Done()
 	for metric := range metricsChannel {
@@ -136,20 +145,26 @@ func updateExistingMetric(existingMetric, endpointMetric *metrics.EndpointMetric
 		existingMetric.StatusCodeCounts[statusCode] += count
 	}
 
+	addToTDigest(existingMetric, endpointMetric)
+}
+
+func addNewMetric(metricsMap map[string]*metrics.EndpointMetrics, key string, endpointMetric *metrics.EndpointMetrics) {
+	initializeTDigest(endpointMetric)
+	metricsMap[key] = endpointMetric
+}
+
+func addToTDigest(existingMetric, endpointMetric *metrics.EndpointMetrics) {
 	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
 	existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
 	existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
 }
 
-func addNewMetric(metricsMap map[string]*metrics.EndpointMetrics, key string, endpointMetric *metrics.EndpointMetrics) {
+func initializeTDigest(endpointMetric *metrics.EndpointMetrics) {
 	endpointMetric.ResponseTimesTDigest = tdigest.New()
 	endpointMetric.TCPHandshakeLatencyTDigest = tdigest.New()
 	endpointMetric.DNSLookupLatencyTDigest = tdigest.New()
-	endpointMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
-	endpointMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
-	endpointMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
 
-	metricsMap[key] = endpointMetric
+	addToTDigest(endpointMetric, endpointMetric)
 }
 
 func displayConfig(config *moduleloader.Config) {
@@ -157,17 +172,14 @@ func displayConfig(config *moduleloader.Config) {
 }
 
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
+	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
+	checkError("Error initializing VM pool", err)
+
 	var waitGroup sync.WaitGroup
 	progressBarWidth := 40
 
-	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
-	if err != nil {
-		log.Fatalf("Error initializing VM pool: %v", err)
-	}
-
 	for i := 0; i < config.ConcurrentUsers; i++ {
 		displayProgressBar(i, config.ConcurrentUsers, progressBarWidth)
-
 		waitGroup.Add(1)
 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
 		if config.RampUpRate > 0 {
@@ -188,7 +200,12 @@ func displayProgressBar(current, total, width int) {
 		current+1,
 		total,
 	)
-
 	fmt.Printf("\r%s", progressBar)
 	os.Stdout.Sync()
+}
+
+func checkError(message string, err error) {
+	if err != nil {
+		log.Fatalf("%s: %v", message, err)
+	}
 }
