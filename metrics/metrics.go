@@ -38,16 +38,18 @@ type Metrics struct {
 }
 
 type EndpointMetrics struct {
-	URL                string
-	Method             string
-	Requests           int
-	TotalDuration      time.Duration
-	TotalResponseTime  time.Duration
-	TotalBytesReceived int
-	TotalBytesSent     int
-	Errors             int
-	StatusCodeCounts   map[int]int
-	ResponseTimes      *tdigest.TDigest
+	URL                 string
+	Method              string
+	StatusCodeCounts    map[int]int
+	ResponseTimes       *tdigest.TDigest
+	Requests            int
+	TotalDuration       time.Duration
+	TotalResponseTime   time.Duration
+	TotalBytesReceived  int
+	TotalBytesSent      int
+	Errors              int
+	TCPHandshakeLatency *tdigest.TDigest
+	DNSLookupLatency    *tdigest.TDigest
 }
 
 func AggregateMetrics(metricsList []Metrics) map[string]*EndpointMetrics {
@@ -55,9 +57,12 @@ func AggregateMetrics(metricsList []Metrics) map[string]*EndpointMetrics {
 	for _, metrics := range metricsList {
 		for key, epMetrics := range metrics.EndpointMetricsMap {
 			if _, exists := aggregatedMetrics[key]; !exists {
+				fmt.Printf("%v     %v", key, epMetrics)
 				aggregatedMetrics[key] = &EndpointMetrics{
-					StatusCodeCounts: make(map[int]int),
-					ResponseTimes:    tdigest.New(),
+					StatusCodeCounts:    make(map[int]int),
+					ResponseTimes:       tdigest.New(),
+					TCPHandshakeLatency: tdigest.New(),
+					DNSLookupLatency:    tdigest.New(),
 				}
 			}
 			mergeEndpointMetrics(aggregatedMetrics[key], epMetrics)
@@ -73,7 +78,20 @@ func mergeEndpointMetrics(dest, src *EndpointMetrics) {
 	dest.TotalBytesReceived += src.TotalBytesReceived
 	dest.TotalBytesSent += src.TotalBytesSent
 	dest.Errors += src.Errors
-	dest.ResponseTimes.Add(src.ResponseTimes.Quantile(0.5), 1)
+	if src.ResponseTimes != nil {
+		dest.ResponseTimes.Add(src.ResponseTimes.Quantile(0.5), 1)
+	}
+
+	// dest.TCPHandshakeLatency.Add(src.TCPHandshakeLatency.Quantile(0.5), 1)
+	if src.TCPHandshakeLatency != nil {
+		if dest.TCPHandshakeLatency == nil {
+			dest.TCPHandshakeLatency = tdigest.New()
+		}
+		dest.TCPHandshakeLatency.Add(src.TCPHandshakeLatency.Quantile(0.5), 1)
+		dest.DNSLookupLatency.Add(src.DNSLookupLatency.Quantile(0.5), 1)
+	}
+	fmt.Printf("check %v", dest.ResponseTimes)
+	fmt.Printf("check1 %v", src.TCPHandshakeLatency)
 	for code, count := range src.StatusCodeCounts {
 		dest.StatusCodeCounts[code] += count
 	}

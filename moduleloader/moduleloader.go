@@ -15,7 +15,6 @@ import (
 	"github.com/accelira/accelira/util"
 	"github.com/dop251/goja"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/influxdata/tdigest"
 )
 
 type Config struct {
@@ -106,16 +105,16 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 				metricsData := metrics.Metrics{
 					EndpointMetricsMap: map[string]*metrics.EndpointMetrics{
 						fmt.Sprintf("%s %s", resp.Method, resp.URL): {
-							URL:                resp.URL,
-							Method:             resp.Method,
-							StatusCodeCounts:   map[int]int{resp.StatusCode: 1},
-							ResponseTimes:      tdigest.New(),
-							Requests:           0,
-							TotalDuration:      resp.Duration,
-							TotalResponseTime:  resp.Duration,
-							TotalBytesReceived: len(resp.Body),
-							TotalBytesSent:     len(resp.URL),
-							Errors:             1,
+							URL:              resp.URL,
+							Method:           resp.Method,
+							StatusCodeCounts: map[int]int{resp.StatusCode: 1},
+							// ResponseTimes:      tdigest.New(),
+							// Requests: 0,
+							// TotalDuration:      resp.Duration,
+							// TotalResponseTime:  resp.Duration,
+							// TotalBytesReceived: len(resp.Body),
+							// TotalBytesSent: len(resp.URL),
+							Errors: 1,
 						},
 					},
 				}

@@ -13,6 +13,7 @@ import (
 
 func GenerateReport(metricsList []metrics.Metrics) {
 	aggregatedMetrics := metrics.AggregateMetrics(metricsList)
+	fmt.Printf("aggregatedMetrics %v", aggregatedMetrics)
 	printSummary(aggregatedMetrics)
 	printDetailedReport(aggregatedMetrics)
 }
@@ -44,10 +45,26 @@ func roundDurationToTwoDecimals(d time.Duration) time.Duration {
 	return time.Duration(roundedSeconds * float64(time.Second))
 }
 
+// func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
+// 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
+// 	t := tabby.New()
+// 	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
+// 	for key, epMetrics := range aggregatedMetrics {
+// 		statusCodes := make([]string, 0)
+// 		for code, count := range epMetrics.StatusCodeCounts {
+// 			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
+// 		}
+// 		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
+// 		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
+// 		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)), time.Duration(percentile50)*time.Millisecond, time.Duration(percentile95)*time.Millisecond, strings.Join(statusCodes, ", "))
+// 	}
+// 	t.Print()
+// }
+
 func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
 	t := tabby.New()
-	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
+	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "TCP Handshake Latency", "DNS Lookup Latency", "Status Codes")
 	for key, epMetrics := range aggregatedMetrics {
 		statusCodes := make([]string, 0)
 		for code, count := range epMetrics.StatusCodeCounts {
@@ -55,7 +72,17 @@ func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) 
 		}
 		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
 		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
-		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)), time.Duration(percentile50)*time.Millisecond, time.Duration(percentile95)*time.Millisecond, strings.Join(statusCodes, ", "))
+		t.AddLine(
+			key,
+			epMetrics.Requests,
+			epMetrics.Errors,
+			roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)),
+			time.Duration(percentile50)*time.Millisecond,
+			time.Duration(percentile95)*time.Millisecond,
+			epMetrics.TCPHandshakeLatency.Quantile(0.5),
+			epMetrics.DNSLookupLatency.Quantile(0.5),
+			strings.Join(statusCodes, ", "),
+		)
 	}
 	t.Print()
 }
