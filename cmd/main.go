@@ -200,6 +200,59 @@ func setupVM(code string) (*moduleloader.Config, error) {
 // 	}
 // }
 
+// func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
+// 	defer metricsWaitGroup.Done()
+
+// 	for metric := range metricsChannel {
+// 		metricsMutex.Lock()
+// 		for key, endpointMetric := range metric.EndpointMetricsMap {
+// 			if existingMetric, exists := metricsMap[key]; exists {
+// 				if endpointMetric.Errors > 0 {
+// 					existingMetric.Errors += endpointMetric.Errors
+// 					continue
+// 				}
+
+// 				// Update existing metric
+// 				existingMetric.Requests += endpointMetric.Requests
+// 				existingMetric.TotalDuration += endpointMetric.TotalDuration
+// 				existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
+// 				existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
+// 				existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
+// 				for statusCode, count := range endpointMetric.StatusCodeCounts {
+// 					existingMetric.StatusCodeCounts[statusCode] += count
+// 				}
+
+// 				if existingMetric.ResponseTimesTDigest == nil {
+// 					existingMetric.ResponseTimesTDigest = tdigest.New()
+// 				}
+
+// 				if existingMetric.TCPHandshakeLatencyTDigest == nil {
+// 					existingMetric.TCPHandshakeLatencyTDigest = tdigest.New()
+// 				}
+
+// 				if existingMetric.DNSLookupLatencyTDigest == nil {
+// 					existingMetric.DNSLookupLatencyTDigest = tdigest.New()
+// 				}
+
+// 				// existingMetric.ResponseTimes = endpointMetric.ResponseTimes
+// 				existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+// 				existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+// 				existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatencyTDigest.Milliseconds()), 1)
+
+// 			} else {
+// 				// Add new metric
+// 				// fmt.Printf("%v", endpointMetric.TCPHandshakeLatency)
+// 				metricsMap[key] = endpointMetric
+// 			}
+// 		}
+
+// 		metricsMutex.Unlock()
+// 	}
+
+// 	// fmt.Printf("debug22 %v", metricsMap)
+
+// }
+
 func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
 	defer metricsWaitGroup.Done()
 
@@ -207,50 +260,45 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap map[string]
 		metricsMutex.Lock()
 		for key, endpointMetric := range metric.EndpointMetricsMap {
 			if existingMetric, exists := metricsMap[key]; exists {
-				if endpointMetric.Errors > 0 {
-					existingMetric.Errors += endpointMetric.Errors
-					continue
-				}
-
-				// Update existing metric
-				existingMetric.Requests += endpointMetric.Requests
-				existingMetric.TotalDuration += endpointMetric.TotalDuration
-				existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
-				existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
-				existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
-				for statusCode, count := range endpointMetric.StatusCodeCounts {
-					existingMetric.StatusCodeCounts[statusCode] += count
-				}
-
-				if existingMetric.ResponseTimesTDigest == nil {
-					existingMetric.ResponseTimesTDigest = tdigest.New()
-				}
-
-				if existingMetric.TCPHandshakeLatencyTDigest == nil {
-					existingMetric.TCPHandshakeLatencyTDigest = tdigest.New()
-				}
-
-				if existingMetric.DNSLookupLatencyTDigest == nil {
-					existingMetric.DNSLookupLatencyTDigest = tdigest.New()
-				}
-
-				// existingMetric.ResponseTimes = endpointMetric.ResponseTimes
-				existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
-				existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
-				existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
-
+				updateExistingMetric(existingMetric, endpointMetric)
 			} else {
-				// Add new metric
-				// fmt.Printf("%v", endpointMetric.TCPHandshakeLatency)
-				metricsMap[key] = endpointMetric
+				addNewMetric(metricsMap, key, endpointMetric)
 			}
 		}
-
 		metricsMutex.Unlock()
 	}
+}
 
-	// fmt.Printf("debug22 %v", metricsMap)
+func updateExistingMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
+	if endpointMetric.Errors > 0 {
+		existingMetric.Errors += endpointMetric.Errors
+		return
+	}
 
+	existingMetric.Requests += endpointMetric.Requests
+	existingMetric.TotalDuration += endpointMetric.TotalDuration
+	existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
+	existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
+	existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
+
+	for statusCode, count := range endpointMetric.StatusCodeCounts {
+		existingMetric.StatusCodeCounts[statusCode] += count
+	}
+
+	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+	existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+	existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+}
+
+func addNewMetric(metricsMap map[string]*metrics.EndpointMetrics, key string, endpointMetric *metrics.EndpointMetrics) {
+	endpointMetric.ResponseTimesTDigest = tdigest.New()
+	endpointMetric.TCPHandshakeLatencyTDigest = tdigest.New()
+	endpointMetric.DNSLookupLatencyTDigest = tdigest.New()
+	endpointMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+	endpointMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+	endpointMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+
+	metricsMap[key] = endpointMetric
 }
 
 func displayConfig(config *moduleloader.Config) {
