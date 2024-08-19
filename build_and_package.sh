@@ -7,13 +7,14 @@ BUILD_DIR="build"
 PACKAGE_NAME="accelira"
 VERSION="v1.0.0"
 TAR_NAME="${PACKAGE_NAME}-${VERSION}.tar.gz"
+CMD_DIR="cmd"
 
 # Clean up previous builds
 rm -rf ${BUILD_DIR}
 mkdir -p ${BUILD_DIR}
 
 # Build the project
-go build -v -o ${BUILD_DIR}/${PACKAGE_NAME}
+go build -v -o ${BUILD_DIR}/${PACKAGE_NAME} ${CMD_DIR}/main.go
 
 # Create the tarball
 tar -czvf ${TAR_NAME} -C ${BUILD_DIR} ${PACKAGE_NAME}
