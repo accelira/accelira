@@ -13,6 +13,9 @@ import (
 type HttpResponse struct {
 	Body       string
 	StatusCode int
+	URL        string
+	Method     string
+	Duration   time.Duration
 }
 
 func HttpRequest(url, method string, body io.Reader, metricsChan chan<- metrics.Metrics) (HttpResponse, error) {
@@ -40,7 +43,13 @@ func HttpRequest(url, method string, body io.Reader, metricsChan chan<- metrics.
 	metrics := collectMetrics(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration)
 	sendMetrics(metrics, metricsChan)
 
-	return HttpResponse{Body: string(responseBody), StatusCode: resp.StatusCode}, nil
+	return HttpResponse{
+		Body:       string(responseBody),
+		StatusCode: resp.StatusCode,
+		URL:        url,
+		Method:     method,
+		Duration:   duration,
+	}, nil
 }
 
 func collectMetrics(url, method string, bytesReceived, bytesSent, statusCode int, duration time.Duration) metrics.Metrics {

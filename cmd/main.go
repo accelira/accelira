@@ -32,8 +32,7 @@ func main() {
 	rootCommand.AddCommand(runCommand)
 
 	if err := rootCommand.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		log.Fatalf("Command execution failed: %v", err)
 	}
 }
 
@@ -52,13 +51,10 @@ func executeScript(cmd *cobra.Command, args []string) {
 	// Create and configure VM
 	vmConfig, err := setupVM(builtCode)
 	if err != nil {
-		fmt.Println("Error setting up VM:", err)
-		return
+		log.Fatalf("Error setting up VM: %v", err)
 	}
 
-	fmt.Printf("Concurrent Users: %d\n", vmConfig.ConcurrentUsers)
-	fmt.Printf("Iterations: %d\n", vmConfig.Iterations)
-	fmt.Printf("Ramp-up Rate: %d\n", vmConfig.RampUpRate)
+	displayConfig(vmConfig)
 
 	metricsChannel := make(chan metrics.Metrics, 10000)
 	var metricsList []metrics.Metrics
@@ -108,7 +104,7 @@ func buildJavaScriptCode(scriptPath string) (string, error) {
 func setupVM(code string) (*moduleloader.Config, error) {
 	_, config, err := vmhandler.CreateConfigVM(code)
 	if err != nil {
-		return &moduleloader.Config{}, err
+		return nil, fmt.Errorf("failed to create VM config: %w", err)
 	}
 	return config, nil
 }
@@ -122,32 +118,11 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsList *[]metrics
 	}
 }
 
-// func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
-// 	var waitGroup sync.WaitGroup
-// 	progressBarWidth := 40
-// 	for i := 0; i < config.ConcurrentUsers; i++ {
-// 		percentage := (i + 1) * 100 / config.ConcurrentUsers
-// 		filledWidth := percentage * progressBarWidth / 100
-// 		progressBar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
-// 			util.Repeat('=', filledWidth),
-// 			util.Repeat(' ', progressBarWidth-filledWidth),
-// 			percentage,
-// 			i+1,
-// 			config.ConcurrentUsers,
-// 		)
-
-// 		fmt.Printf("\r%s", progressBar)
-// 		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
-
-// 		waitGroup.Add(1)
-// 		go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
-// 		if config.RampUpRate > 0 {
-// 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
-// 		}
-// 	}
-
-// 	waitGroup.Wait()
-// }
+func displayConfig(config *moduleloader.Config) {
+	fmt.Printf("Concurrent Users: %d\n", config.ConcurrentUsers)
+	fmt.Printf("Iterations: %d\n", config.Iterations)
+	fmt.Printf("Ramp-up Rate: %d\n", config.RampUpRate)
+}
 
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
 	var waitGroup sync.WaitGroup
@@ -160,21 +135,9 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	}
 
 	for i := 0; i < config.ConcurrentUsers; i++ {
-		percentage := (i + 1) * 100 / config.ConcurrentUsers
-		filledWidth := percentage * progressBarWidth / 100
-		progressBar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
-			util.Repeat('=', filledWidth),
-			util.Repeat(' ', progressBarWidth-filledWidth),
-			percentage,
-			i+1,
-			config.ConcurrentUsers,
-		)
-
-		fmt.Printf("\r%s", progressBar)
-		os.Stdout.Sync() // Ensure the progress bar is flushed to the output
+		displayProgressBar(i, config.ConcurrentUsers, progressBarWidth)
 
 		waitGroup.Add(1)
-		// go vmhandler.RunScript(code, metricsChannel, &waitGroup, config)
 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
 		if config.RampUpRate > 0 {
 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
@@ -182,4 +145,19 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	}
 
 	waitGroup.Wait()
+}
+
+func displayProgressBar(current, total, width int) {
+	percentage := (current + 1) * 100 / total
+	filledWidth := percentage * width / 100
+	progressBar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
+		util.Repeat('=', filledWidth),
+		util.Repeat(' ', width-filledWidth),
+		percentage,
+		current+1,
+		total,
+	)
+
+	fmt.Printf("\r%s", progressBar)
+	os.Stdout.Sync() // Ensure the progress bar is flushed to the output
 }

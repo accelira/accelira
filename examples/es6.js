@@ -18,7 +18,7 @@ export default function () {
         const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
 
         const getResponse = http.get(getUrl);
-        getResponse.assertStatus(200)
+        getResponse.assertStatus(201)
 
         const postResponse = http.post(postUrl, JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
         postResponse.assertStatus(201)

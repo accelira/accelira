@@ -15,6 +15,7 @@ import (
 	"github.com/accelira/accelira/util"
 	"github.com/dop251/goja"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/influxdata/tdigest"
 )
 
 type Config struct {
@@ -61,30 +62,65 @@ func createHTTPModule(metricsChan chan<- metrics.Metrics) map[string]interface{}
 	return map[string]interface{}{
 		"get": func(url string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "GET", nil, metricsChan)
-			return createResponseObject(resp, err)
+			return createResponseObject(resp, err, metricsChan)
 		},
 		"post": func(url string, body string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "POST", strings.NewReader(body), metricsChan)
-			return createResponseObject(resp, err)
+			return createResponseObject(resp, err, metricsChan)
 		},
 		"put": func(url string, body string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "PUT", strings.NewReader(body), metricsChan)
-			return createResponseObject(resp, err)
+			return createResponseObject(resp, err, metricsChan)
 		},
 		"delete": func(url string) map[string]interface{} {
 			resp, err := httpclient.HttpRequest(url, "DELETE", nil, metricsChan)
-			return createResponseObject(resp, err)
+			return createResponseObject(resp, err, metricsChan)
 		},
 	}
 }
 
-func createResponseObject(resp httpclient.HttpResponse, err error) map[string]interface{} {
+// func createResponseObject(resp httpclient.HttpResponse, err error) map[string]interface{} {
+// 	return map[string]interface{}{
+// 		"response": resp,
+// 		"error":    err,
+// 		"assertStatus": func(expectedStatus int) map[string]interface{} {
+// 			if resp.StatusCode != expectedStatus {
+// 				panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
+
+// 			}
+// 			return map[string]interface{}{
+// 				"response": resp,
+// 				"error":    err,
+// 			}
+// 		},
+// 	}
+// }
+
+func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan chan<- metrics.Metrics) map[string]interface{} {
 	return map[string]interface{}{
 		"response": resp,
 		"error":    err,
 		"assertStatus": func(expectedStatus int) map[string]interface{} {
 			if resp.StatusCode != expectedStatus {
-				panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
+				// Send metrics for failed assertion
+				metricsData := metrics.Metrics{
+					EndpointMetricsMap: map[string]*metrics.EndpointMetrics{
+						fmt.Sprintf("%s %s", resp.Method, resp.URL): {
+							URL:                resp.URL,
+							Method:             resp.Method,
+							StatusCodeCounts:   map[int]int{resp.StatusCode: 1},
+							ResponseTimes:      tdigest.New(),
+							Requests:           0,
+							TotalDuration:      resp.Duration,
+							TotalResponseTime:  resp.Duration,
+							TotalBytesReceived: len(resp.Body),
+							TotalBytesSent:     len(resp.URL),
+							Errors:             1,
+						},
+					},
+				}
+				metrics.SendMetrics(metricsData, metricsChan)
+				// panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
 			}
 			return map[string]interface{}{
 				"response": resp,
