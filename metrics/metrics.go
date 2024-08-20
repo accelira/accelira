@@ -16,6 +16,10 @@ func SendMetrics(metrics Metrics, metricsChan chan<- Metrics) {
 	}
 }
 
+func NewTDigest() *tdigest.TDigest {
+	return tdigest.New()
+}
+
 func CollectGroupMetrics(name string, duration time.Duration) Metrics {
 	key := fmt.Sprintf("group: %s", name)
 	epMetrics := &EndpointMetrics{

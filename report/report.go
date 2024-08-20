@@ -49,7 +49,7 @@ func GenerateReport1(metricsMap *sync.Map) {
 
 func printSummary(metricsMap *sync.Map) {
 	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
-	color.New(color.FgGreen).Add(color.Bold).Println("\n Summary:")
+	color.New(color.FgGreen).Add(color.Bold).Println("\nSummary:")
 
 	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
 
