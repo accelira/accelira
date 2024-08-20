@@ -89,16 +89,20 @@ type HttpResponse struct {
 
 var (
 	sharedTransport = &http.Transport{
-		DisableKeepAlives: false,
+		DisableKeepAlives:   false,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
 	}
 	sharedClient = &http.Client{
 		Transport: sharedTransport,
+		Timeout:   30 * time.Second,
 	}
 )
 
 func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
 
-	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, GotFirstResponseByteTime time.Time
+	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, gotFirstResponseByteTime time.Time
 
 	trace := &httptrace.ClientTrace{
 		DNSStart:     func(info httptrace.DNSStartInfo) { dnsStart = time.Now() },
@@ -106,14 +110,13 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 		ConnectStart: func(network, addr string) { connectStart = time.Now() },
 		ConnectDone:  func(network, addr string, err error) { connectEnd = time.Now() },
 		GotFirstResponseByte: func() {
-			GotFirstResponseByteTime = time.Now()
+			gotFirstResponseByteTime = time.Now()
 		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			wroteRequestTime = time.Now()
 		},
 	}
 
-	// start := time.Now()
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return HttpResponse{}, err
@@ -128,8 +131,7 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 	}
 	defer resp.Body.Close()
 
-	// duration := time.Since(start)
-	duration := GotFirstResponseByteTime.Sub(wroteRequestTime)
+	duration := gotFirstResponseByteTime.Sub(wroteRequestTime)
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return HttpResponse{}, err
