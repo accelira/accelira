@@ -55,30 +55,68 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
-func executeScript(cmd *cobra.Command, args []string) {
-	util.DisplayLogo()
+func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
+	defer metricsWaitGroup.Done()
 
-	builtCode, err := buildJavaScriptCode(args[0])
-	checkError("Error building JavaScript", err)
+	for metric := range metricsChannel {
+		for key, endpointMetric := range metric.EndpointMetricsMap {
+			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
+			existingMetric := value.(*metrics.EndpointMetrics)
 
-	vmConfig, err := setupVM(builtCode)
-	checkError("Error setting up VM", err)
+			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
+			mutex := mutexValue.(*sync.Mutex)
 
-	displayConfig(vmConfig)
+			mutex.Lock()
+			if loaded {
+				updateMetric(existingMetric, endpointMetric)
+			} else {
+				addNewMetric(metricsMap, key, endpointMetric)
+			}
+			mutex.Unlock()
+		}
+	}
+}
 
-	metricsChannel := make(chan metrics.Metrics, 1000)
-	metricsMap := make(map[string]*metrics.EndpointMetrics)
-	var metricsMutex sync.Mutex
-	var metricsWaitGroup sync.WaitGroup
+func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
+	if endpointMetric.Errors > 0 {
+		existingMetric.Errors += endpointMetric.Errors
+		return
+	}
 
-	startMetricsCollection(metricsChannel, metricsMap, &metricsMutex, &metricsWaitGroup)
+	existingMetric.Requests += endpointMetric.Requests
+	existingMetric.TotalDuration += endpointMetric.TotalDuration
+	existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
+	existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
+	existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
 
-	executeTestScripts(builtCode, vmConfig, metricsChannel)
+	if existingMetric.StatusCodeCounts == nil {
+		existingMetric.StatusCodeCounts = make(map[int]int)
+	}
 
-	close(metricsChannel)
-	metricsWaitGroup.Wait()
+	for statusCode, count := range endpointMetric.StatusCodeCounts {
+		existingMetric.StatusCodeCounts[statusCode] += count
+	}
 
-	report.GenerateReport1(metricsMap)
+	addToTDigest(existingMetric, endpointMetric)
+}
+
+func addNewMetric(metricsMap *sync.Map, key string, endpointMetric *metrics.EndpointMetrics) {
+	initializeTDigest(endpointMetric)
+	metricsMap.Store(key, endpointMetric)
+}
+
+func addToTDigest(existingMetric, endpointMetric *metrics.EndpointMetrics) {
+	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+	existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+	existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+}
+
+func initializeTDigest(endpointMetric *metrics.EndpointMetrics) {
+	endpointMetric.ResponseTimesTDigest = tdigest.New()
+	endpointMetric.TCPHandshakeLatencyTDigest = tdigest.New()
+	endpointMetric.DNSLookupLatencyTDigest = tdigest.New()
+
+	addToTDigest(endpointMetric, endpointMetric)
 }
 
 func buildJavaScriptCode(scriptPath string) (string, error) {
@@ -109,62 +147,36 @@ func setupVM(code string) (*moduleloader.Config, error) {
 	return config, nil
 }
 
-func startMetricsCollection(metricsChannel chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
+func startMetricsCollection(metricsChannel chan metrics.Metrics, metricsMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
 	metricsWaitGroup.Add(1)
-	go gatherMetrics(metricsChannel, metricsMap, metricsMutex, metricsWaitGroup)
+	metricsMutexMap := &sync.Map{}
+	go gatherMetrics(metricsChannel, metricsMap, metricsMutexMap, metricsWaitGroup)
 }
 
-func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap map[string]*metrics.EndpointMetrics, metricsMutex *sync.Mutex, metricsWaitGroup *sync.WaitGroup) {
-	defer metricsWaitGroup.Done()
-	for metric := range metricsChannel {
-		metricsMutex.Lock()
-		for key, endpointMetric := range metric.EndpointMetricsMap {
-			if existingMetric, exists := metricsMap[key]; exists {
-				updateExistingMetric(existingMetric, endpointMetric)
-			} else {
-				addNewMetric(metricsMap, key, endpointMetric)
-			}
-		}
-		metricsMutex.Unlock()
-	}
-}
+func executeScript(cmd *cobra.Command, args []string) {
+	util.DisplayLogo()
 
-func updateExistingMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
-	if endpointMetric.Errors > 0 {
-		existingMetric.Errors += endpointMetric.Errors
-		return
-	}
+	builtCode, err := buildJavaScriptCode(args[0])
+	checkError("Error building JavaScript", err)
 
-	existingMetric.Requests += endpointMetric.Requests
-	existingMetric.TotalDuration += endpointMetric.TotalDuration
-	existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
-	existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
-	existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
+	vmConfig, err := setupVM(builtCode)
+	checkError("Error setting up VM", err)
 
-	for statusCode, count := range endpointMetric.StatusCodeCounts {
-		existingMetric.StatusCodeCounts[statusCode] += count
-	}
+	displayConfig(vmConfig)
 
-	addToTDigest(existingMetric, endpointMetric)
-}
+	metricsChannel := make(chan metrics.Metrics, 1000)
+	var metricsMap sync.Map
+	var metricsWaitGroup sync.WaitGroup
 
-func addNewMetric(metricsMap map[string]*metrics.EndpointMetrics, key string, endpointMetric *metrics.EndpointMetrics) {
-	initializeTDigest(endpointMetric)
-	metricsMap[key] = endpointMetric
-}
+	startMetricsCollection(metricsChannel, &metricsMap, &metricsWaitGroup)
 
-func addToTDigest(existingMetric, endpointMetric *metrics.EndpointMetrics) {
-	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
-	existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
-	existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
-}
+	executeTestScripts(builtCode, vmConfig, metricsChannel)
+	fmt.Printf("Finished executing api call, now generating report")
 
-func initializeTDigest(endpointMetric *metrics.EndpointMetrics) {
-	endpointMetric.ResponseTimesTDigest = tdigest.New()
-	endpointMetric.TCPHandshakeLatencyTDigest = tdigest.New()
-	endpointMetric.DNSLookupLatencyTDigest = tdigest.New()
+	close(metricsChannel)
+	metricsWaitGroup.Wait()
 
-	addToTDigest(endpointMetric, endpointMetric)
+	report.GenerateReport1(&metricsMap)
 }
 
 func displayConfig(config *moduleloader.Config) {

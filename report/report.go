@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/accelira/accelira/metrics"
@@ -11,27 +12,26 @@ import (
 	"github.com/fatih/color"
 )
 
-// func GenerateReport(metricsList []metrics.Metrics) {
-// 	aggregatedMetrics := metrics.AggregateMetrics(metricsList)
-// 	// fmt.Printf("aggregatedMetrics %v", aggregatedMetrics)
-// 	printSummary(aggregatedMetrics)
-// 	printDetailedReport(aggregatedMetrics)
-// }
-
-func GenerateReport1(metricsMap map[string]*metrics.EndpointMetrics) {
+func GenerateReport1(metricsMap *sync.Map) {
 	printSummary(metricsMap)
 	color.New(color.FgGreen).Add(color.Bold).Println("\nDetailed Report:")
 	t := tabby.New()
 	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "TCP Handshake Latency", "DNS Lookup Latency", "Status Codes")
-	for key, epMetrics := range metricsMap {
+
+	metricsMap.Range(func(key, value interface{}) bool {
+		endpoint := key.(string)
+		epMetrics := value.(*metrics.EndpointMetrics)
+
 		statusCodes := make([]string, 0)
 		for code, count := range epMetrics.StatusCodeCounts {
 			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
 		}
+
 		percentile50 := epMetrics.ResponseTimesTDigest.Quantile(0.5)
 		percentile95 := epMetrics.ResponseTimesTDigest.Quantile(0.95)
+
 		t.AddLine(
-			key,
+			endpoint,
 			epMetrics.Requests,
 			epMetrics.Errors,
 			roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)),
@@ -41,19 +41,26 @@ func GenerateReport1(metricsMap map[string]*metrics.EndpointMetrics) {
 			time.Duration(epMetrics.DNSLookupLatencyTDigest.Quantile(0.9))*time.Millisecond,
 			strings.Join(statusCodes, ", "),
 		)
-	}
+		return true
+	})
+
 	t.Print()
 }
 
-func printSummary(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
+func printSummary(metricsMap *sync.Map) {
 	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
 	color.New(color.FgGreen).Add(color.Bold).Println("\n Summary:")
+
 	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
-	for _, epMetrics := range aggregatedMetrics {
+
+	metricsMap.Range(func(key, value interface{}) bool {
+		epMetrics := value.(*metrics.EndpointMetrics)
 		totalRequests += epMetrics.Requests
 		totalErrors += epMetrics.Errors
 		totalDuration += epMetrics.TotalDuration
-	}
+		return true
+	})
+
 	fmt.Printf("  Total Requests       : %d\n", totalRequests)
 	fmt.Printf("  Total Errors         : %d\n", totalErrors)
 	fmt.Printf("  Total Duration       : %v\n", totalDuration)
@@ -66,72 +73,8 @@ func printSummary(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
 	fmt.Println()
 }
 
-// func printSummary(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
-// 	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
-// 	color.New(color.FgGreen).Add(color.Bold).Println("Summary:")
-// 	totalRequests, totalErrors, totalDuration := 0, 0, time.Duration(0)
-// 	for _, epMetrics := range aggregatedMetrics {
-// 		totalRequests += epMetrics.Requests
-// 		totalErrors += epMetrics.Errors
-// 		totalDuration += epMetrics.TotalDuration
-// 	}
-// 	fmt.Printf("  Total Requests       : %d\n", totalRequests)
-// 	fmt.Printf("  Total Errors         : %d\n", totalErrors)
-// 	fmt.Printf("  Total Duration       : %v\n", totalDuration)
-// 	if totalRequests > 0 {
-// 		avgDuration := totalDuration / time.Duration(totalRequests)
-// 		fmt.Printf("  Average Duration     : %v\n", avgDuration)
-// 	} else {
-// 		fmt.Println("  Average Duration     : N/A")
-// 	}
-// 	fmt.Println()
-
-// }
-
 func roundDurationToTwoDecimals(d time.Duration) time.Duration {
 	seconds := d.Seconds()
 	roundedSeconds := math.Round(seconds*100) / 100
 	return time.Duration(roundedSeconds * float64(time.Second))
 }
-
-// func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
-// 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
-// 	t := tabby.New()
-// 	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "Status Codes")
-// 	for key, epMetrics := range aggregatedMetrics {
-// 		statusCodes := make([]string, 0)
-// 		for code, count := range epMetrics.StatusCodeCounts {
-// 			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
-// 		}
-// 		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
-// 		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
-// 		t.AddLine(key, epMetrics.Requests, epMetrics.Errors, roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)), time.Duration(percentile50)*time.Millisecond, time.Duration(percentile95)*time.Millisecond, strings.Join(statusCodes, ", "))
-// 	}
-// 	t.Print()
-// }
-
-// func printDetailedReport(aggregatedMetrics map[string]*metrics.EndpointMetrics) {
-// 	color.New(color.FgGreen).Add(color.Bold).Println("Detailed Report:")
-// 	t := tabby.New()
-// 	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "TCP Handshake Latency", "DNS Lookup Latency", "Status Codes")
-// 	for key, epMetrics := range aggregatedMetrics {
-// 		statusCodes := make([]string, 0)
-// 		for code, count := range epMetrics.StatusCodeCounts {
-// 			statusCodes = append(statusCodes, fmt.Sprintf("%d: %d", code, count))
-// 		}
-// 		percentile50 := epMetrics.ResponseTimes.Quantile(0.5)
-// 		percentile95 := epMetrics.ResponseTimes.Quantile(0.95)
-// 		t.AddLine(
-// 			key,
-// 			epMetrics.Requests,
-// 			epMetrics.Errors,
-// 			roundDurationToTwoDecimals(epMetrics.TotalResponseTime/time.Duration(epMetrics.Requests)),
-// 			time.Duration(percentile50)*time.Millisecond,
-// 			time.Duration(percentile95)*time.Millisecond,
-// 			epMetrics.TCPHandshakeLatency.Quantile(0.5),
-// 			epMetrics.DNSLookupLatency.Quantile(0.5),
-// 			strings.Join(statusCodes, ", "),
-// 		)
-// 	}
-// 	t.Print()
-// }
