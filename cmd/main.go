@@ -126,6 +126,8 @@ func bToMb(b uint64) uint64 {
 // 	}
 // }
 
+var metricsReceived int32
+
 func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
 	defer metricsWaitGroup.Done()
 
@@ -133,7 +135,6 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var metricsReceived int32
 	var totalTimeElapsed int64
 	var tickCount int32
 
@@ -147,7 +148,7 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 				return
 			}
 			// Increment the counter for metrics received
-			atomic.AddInt32(&metricsReceived, 1)
+
 			for key, endpointMetric := range metric.EndpointMetricsMap {
 				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
 				existingMetric := value.(*metrics.EndpointMetrics)
@@ -177,8 +178,11 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
 	if endpointMetric.Errors > 0 {
 		existingMetric.Errors += endpointMetric.Errors
+
 		return
 	}
+
+	atomic.AddInt32(&metricsReceived, 1)
 
 	existingMetric.Requests += endpointMetric.Requests
 	existingMetric.TotalDuration += endpointMetric.TotalDuration
