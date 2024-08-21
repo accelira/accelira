@@ -3,10 +3,14 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	_ "net/http/pprof"
 
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"
@@ -19,6 +23,9 @@ import (
 )
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	rootCmd := createRootCommand()
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Command execution failed: %v", err)
@@ -55,24 +62,116 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
+// func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
+// 	defer metricsWaitGroup.Done()
+
+// 	for metric := range metricsChannel {
+// 		for key, endpointMetric := range metric.EndpointMetricsMap {
+// 			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
+// 			existingMetric := value.(*metrics.EndpointMetrics)
+
+// 			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
+// 			mutex := mutexValue.(*sync.Mutex)
+
+// 			mutex.Lock()
+// 			if loaded {
+// 				updateMetric(existingMetric, endpointMetric)
+// 			} else {
+// 				addNewMetric(metricsMap, key, endpointMetric)
+// 			}
+// 			mutex.Unlock()
+// 		}
+// 	}
+// }
+
+var metricsReceived int32
+
+// func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
+// 	defer metricsWaitGroup.Done()
+
+// 	// Periodically print progress
+// 	ticker := time.NewTicker(1 * time.Second)
+// 	defer ticker.Stop()
+
+// 	for {
+// 		select {
+// 		case metric, ok := <-metricsChannel:
+// 			if !ok {
+// 				// Channel is closed and drained
+// 				return
+// 			}
+
+// 			// Increment the counter for metrics received
+// 			atomic.AddInt32(&metricsReceived, 1)
+
+// 			for key, endpointMetric := range metric.EndpointMetricsMap {
+// 				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
+// 				existingMetric := value.(*metrics.EndpointMetrics)
+
+// 				mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
+// 				mutex := mutexValue.(*sync.Mutex)
+
+// 				mutex.Lock()
+// 				if loaded {
+// 					updateMetric(existingMetric, endpointMetric)
+// 				} else {
+// 					addNewMetric(metricsMap, key, endpointMetric)
+// 				}
+// 				mutex.Unlock()
+// 			}
+
+// 		case <-ticker.C:
+// 			// Print progress every second
+// 			currentCount := atomic.LoadInt32(&metricsReceived)
+// 			fmt.Printf("Metrics received so far: %d\n", currentCount)
+// 		}
+// 	}
+// }
+
 func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
 	defer metricsWaitGroup.Done()
 
-	for metric := range metricsChannel {
-		for key, endpointMetric := range metric.EndpointMetricsMap {
-			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
-			existingMetric := value.(*metrics.EndpointMetrics)
+	// Periodically print progress
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
-			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
-			mutex := mutexValue.(*sync.Mutex)
+	var metricsReceived int32
+	var totalTimeElapsed int64
+	var tickCount int32
 
-			mutex.Lock()
-			if loaded {
-				updateMetric(existingMetric, endpointMetric)
-			} else {
-				addNewMetric(metricsMap, key, endpointMetric)
+	startTime := time.Now()
+
+	for {
+		select {
+		case metric, ok := <-metricsChannel:
+			if !ok {
+				// Channel is closed and drained
+				return
 			}
-			mutex.Unlock()
+			// Increment the counter for metrics received
+			atomic.AddInt32(&metricsReceived, 1)
+			for key, endpointMetric := range metric.EndpointMetricsMap {
+				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
+				existingMetric := value.(*metrics.EndpointMetrics)
+				mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
+				mutex := mutexValue.(*sync.Mutex)
+				mutex.Lock()
+				if loaded {
+					updateMetric(existingMetric, endpointMetric)
+				} else {
+					addNewMetric(metricsMap, key, endpointMetric)
+				}
+				mutex.Unlock()
+			}
+		case <-ticker.C:
+			// Print progress every second
+			currentCount := atomic.LoadInt32(&metricsReceived)
+			elapsed := time.Since(startTime).Seconds()
+			atomic.AddInt64(&totalTimeElapsed, int64(elapsed))
+			atomic.AddInt32(&tickCount, 1)
+			averageDuration := float64(totalTimeElapsed) / float64(tickCount)
+			fmt.Printf("Responses received so far: %d | Average latency: %.2f seconds\n", currentCount, averageDuration)
+			startTime = time.Now() // Reset start time for next interval
 		}
 	}
 }
@@ -164,14 +263,14 @@ func executeScript(cmd *cobra.Command, args []string) {
 
 	displayConfig(vmConfig)
 
-	metricsChannel := make(chan metrics.Metrics, 1000)
+	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*2)
 	var metricsMap sync.Map
 	var metricsWaitGroup sync.WaitGroup
 
 	startMetricsCollection(metricsChannel, &metricsMap, &metricsWaitGroup)
 
 	executeTestScripts(builtCode, vmConfig, metricsChannel)
-	fmt.Printf("Finished executing api call, now generating report")
+	// fmt.Printf("Finished executing api call, now generating report")
 
 	close(metricsChannel)
 	metricsWaitGroup.Wait()
@@ -185,13 +284,13 @@ func displayConfig(config *moduleloader.Config) {
 
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
 	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
-	checkError("Error initializing VM pool", err)
+	checkError("Error initializing VM pool\n", err)
 
 	var waitGroup sync.WaitGroup
-	progressBarWidth := 40
+	// progressBarWidth := 40
 
 	for i := 0; i < config.ConcurrentUsers; i++ {
-		displayProgressBar(i, config.ConcurrentUsers, progressBarWidth)
+		// displayProgressBar(i, config.ConcurrentUsers, progressBarWidth)
 		waitGroup.Add(1)
 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
 		if config.RampUpRate > 0 {

@@ -28,7 +28,7 @@ func GenerateReport1(metricsMap *sync.Map) {
 		}
 
 		percentile50 := epMetrics.ResponseTimesTDigest.Quantile(0.5)
-		percentile95 := epMetrics.ResponseTimesTDigest.Quantile(0.95)
+		percentile95 := epMetrics.ResponseTimesTDigest.Quantile(1)
 
 		t.AddLine(
 			endpoint,
