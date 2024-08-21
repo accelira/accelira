@@ -89,20 +89,16 @@ type HttpResponse struct {
 
 var (
 	sharedTransport = &http.Transport{
-		DisableKeepAlives:   false,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives: false,
 	}
 	sharedClient = &http.Client{
 		Transport: sharedTransport,
-		Timeout:   30 * time.Second,
 	}
 )
 
 func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
 
-	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, gotFirstResponseByteTime time.Time
+	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, GotFirstResponseByteTime time.Time
 
 	trace := &httptrace.ClientTrace{
 		DNSStart:     func(info httptrace.DNSStartInfo) { dnsStart = time.Now() },
@@ -110,7 +106,7 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 		ConnectStart: func(network, addr string) { connectStart = time.Now() },
 		ConnectDone:  func(network, addr string, err error) { connectEnd = time.Now() },
 		GotFirstResponseByte: func() {
-			gotFirstResponseByteTime = time.Now()
+			GotFirstResponseByteTime = time.Now()
 		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			wroteRequestTime = time.Now()
@@ -125,13 +121,19 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
 
+	responseStartTime := time.Now()
 	resp, err := sharedClient.Do(req)
 	if err != nil {
 		return HttpResponse{}, err
 	}
+
+	responseEndTime := time.Now()
+	totalResponseTime := responseEndTime.Sub(responseStartTime)
+
 	defer resp.Body.Close()
 
-	duration := gotFirstResponseByteTime.Sub(wroteRequestTime)
+	// duration := time.Since(start)
+	duration := GotFirstResponseByteTime.Sub(wroteRequestTime)
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return HttpResponse{}, err
@@ -140,7 +142,7 @@ func HttpRequest(url, method string, body io.Reader, metricsChannel chan<- metri
 	tcpHandshakeLatency := connectEnd.Sub(connectStart)
 	dnsLookupLatency := dnsEnd.Sub(dnsStart)
 
-	metrics := collectMetricsWithLatencies(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, duration, tcpHandshakeLatency, dnsLookupLatency)
+	metrics := collectMetricsWithLatencies(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, totalResponseTime, tcpHandshakeLatency, dnsLookupLatency)
 	sendMetrics(metrics, metricsChannel)
 
 	return HttpResponse{

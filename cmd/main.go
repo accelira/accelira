@@ -84,8 +84,6 @@ func bToMb(b uint64) uint64 {
 // 	}
 // }
 
-var metricsReceived int32
-
 // func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
 // 	defer metricsWaitGroup.Done()
 
@@ -206,8 +204,12 @@ func addNewMetric(metricsMap *sync.Map, key string, endpointMetric *metrics.Endp
 
 func addToTDigest(existingMetric, endpointMetric *metrics.EndpointMetrics) {
 	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
-	existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
-	existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+	if endpointMetric.TCPHandshakeLatency.Milliseconds() > 0 {
+		existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+	}
+	if endpointMetric.DNSLookupLatency.Milliseconds() > 0 {
+		existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+	}
 }
 
 func initializeTDigest(endpointMetric *metrics.EndpointMetrics) {
