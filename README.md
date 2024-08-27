@@ -28,6 +28,12 @@ Accelira isn’t just another performance testing tool—it’s the evolution of
 ## How Does It Work?
 Imagine sending a battalion of virtual users to storm your web application. Accelira does just that, simulating real-world usage scenarios to ensure your app is battle-tested and ready for the big leagues.
 
+## Install
+
+```bash
+brew tap accelira/homebrew-accelira
+brew install accelira
+```
 
 ## Quick Start
 ### Get Up and Running in Minutes
