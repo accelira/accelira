@@ -1,10 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -22,7 +22,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	metricsMap       sync.Map
+	metricsReceived  int32
+	metricsMutexMap  sync.Map
+	metricsWaitGroup sync.WaitGroup
+)
+
 func main() {
+	// Start the real-time monitoring dashboard
+	go startDashboard()
+
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
@@ -62,73 +72,7 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
-// func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
-// 	defer metricsWaitGroup.Done()
-
-// 	for metric := range metricsChannel {
-// 		for key, endpointMetric := range metric.EndpointMetricsMap {
-// 			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
-// 			existingMetric := value.(*metrics.EndpointMetrics)
-
-// 			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
-// 			mutex := mutexValue.(*sync.Mutex)
-
-// 			mutex.Lock()
-// 			if loaded {
-// 				updateMetric(existingMetric, endpointMetric)
-// 			} else {
-// 				addNewMetric(metricsMap, key, endpointMetric)
-// 			}
-// 			mutex.Unlock()
-// 		}
-// 	}
-// }
-
-// func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
-// 	defer metricsWaitGroup.Done()
-
-// 	// Periodically print progress
-// 	ticker := time.NewTicker(1 * time.Second)
-// 	defer ticker.Stop()
-
-// 	for {
-// 		select {
-// 		case metric, ok := <-metricsChannel:
-// 			if !ok {
-// 				// Channel is closed and drained
-// 				return
-// 			}
-
-// 			// Increment the counter for metrics received
-// 			atomic.AddInt32(&metricsReceived, 1)
-
-// 			for key, endpointMetric := range metric.EndpointMetricsMap {
-// 				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
-// 				existingMetric := value.(*metrics.EndpointMetrics)
-
-// 				mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
-// 				mutex := mutexValue.(*sync.Mutex)
-
-// 				mutex.Lock()
-// 				if loaded {
-// 					updateMetric(existingMetric, endpointMetric)
-// 				} else {
-// 					addNewMetric(metricsMap, key, endpointMetric)
-// 				}
-// 				mutex.Unlock()
-// 			}
-
-// 		case <-ticker.C:
-// 			// Print progress every second
-// 			currentCount := atomic.LoadInt32(&metricsReceived)
-// 			fmt.Printf("Metrics received so far: %d\n", currentCount)
-// 		}
-// 	}
-// }
-
-var metricsReceived int32
-
-func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, metricsMutexMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
+func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 	defer metricsWaitGroup.Done()
 
 	// Periodically print progress
@@ -148,7 +92,6 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 				return
 			}
 			// Increment the counter for metrics received
-
 			for key, endpointMetric := range metric.EndpointMetricsMap {
 				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
 				existingMetric := value.(*metrics.EndpointMetrics)
@@ -158,7 +101,7 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 				if loaded {
 					updateMetric(existingMetric, endpointMetric)
 				} else {
-					addNewMetric(metricsMap, key, endpointMetric)
+					addNewMetric(&metricsMap, key, endpointMetric)
 				}
 				mutex.Unlock()
 			}
@@ -178,7 +121,6 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics, metricsMap *sync.Map, 
 func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
 	if endpointMetric.Errors > 0 {
 		existingMetric.Errors += endpointMetric.Errors
-
 		return
 	}
 
@@ -252,10 +194,9 @@ func setupVM(code string) (*moduleloader.Config, error) {
 	return config, nil
 }
 
-func startMetricsCollection(metricsChannel chan metrics.Metrics, metricsMap *sync.Map, metricsWaitGroup *sync.WaitGroup) {
+func startMetricsCollection(metricsChannel chan metrics.Metrics) {
 	metricsWaitGroup.Add(1)
-	metricsMutexMap := &sync.Map{}
-	go gatherMetrics(metricsChannel, metricsMap, metricsMutexMap, metricsWaitGroup)
+	go gatherMetrics(metricsChannel)
 }
 
 func executeScript(cmd *cobra.Command, args []string) {
@@ -270,13 +211,10 @@ func executeScript(cmd *cobra.Command, args []string) {
 	displayConfig(vmConfig)
 
 	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*2)
-	var metricsMap sync.Map
-	var metricsWaitGroup sync.WaitGroup
 
-	startMetricsCollection(metricsChannel, &metricsMap, &metricsWaitGroup)
+	startMetricsCollection(metricsChannel)
 
 	executeTestScripts(builtCode, vmConfig, metricsChannel)
-	// fmt.Printf("Finished executing api call, now generating report")
 
 	close(metricsChannel)
 	metricsWaitGroup.Wait()
@@ -293,10 +231,8 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	checkError("Error initializing VM pool\n", err)
 
 	var waitGroup sync.WaitGroup
-	// progressBarWidth := 40
 
 	for i := 0; i < config.ConcurrentUsers; i++ {
-		// displayProgressBar(i, config.ConcurrentUsers, progressBarWidth)
 		waitGroup.Add(1)
 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
 		if config.RampUpRate > 0 {
@@ -307,22 +243,215 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	waitGroup.Wait()
 }
 
-func displayProgressBar(current, total, width int) {
-	percentage := (current + 1) * 100 / total
-	filledWidth := percentage * width / 100
-	progressBar := fmt.Sprintf("[%s%s] %d%% (Current: %d / Target: %d)",
-		util.Repeat('=', filledWidth),
-		util.Repeat(' ', width-filledWidth),
-		percentage,
-		current+1,
-		total,
-	)
-	fmt.Printf("\r%s", progressBar)
-	os.Stdout.Sync()
-}
-
 func checkError(message string, err error) {
 	if err != nil {
 		log.Fatalf("%s: %v", message, err)
 	}
+}
+
+const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accelira Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #e0e5e8;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        #metrics {
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        #charts {
+            margin-top: 30px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .chart-container {
+            flex: 1 1 calc(33% - 30px); /* Adjust the percentage as needed for different numbers of charts */
+            min-width: 300px; /* Minimum width for each chart */
+            padding: 15px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        canvas {
+            width: 100% !important;
+            height: 300px !important; /* Adjust height if needed */
+        }
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Accelira Performance Dashboard</h1>
+        <div id="metrics">Loading metrics...</div>
+        <div id="charts"></div>
+        <div class="footer">
+            <p>Accelira Dashboard - Real-time Metrics Visualization</p>
+        </div>
+        <script>
+            const charts = {};
+
+            async function fetchMetrics() {
+                try {
+                    const response = await fetch('/metrics');
+                    const data = await response.json();
+                    const metricsDiv = document.getElementById('metrics');
+                    metricsDiv.textContent = JSON.stringify(data, null, 2);
+
+                    const chartsDiv = document.getElementById('charts');
+                    
+                    for (let endpoint in data) {
+                        const endpointData = data[endpoint];
+                        const chartId = "chart-" + endpoint.replace(/[^a-zA-Z0-9]/g, '-');
+                        
+                        if (!charts[chartId]) {
+                            const chartContainer = document.createElement('div');
+                            chartContainer.className = 'chart-container';
+                            chartContainer.innerHTML = "<h2>" + endpoint + "</h2><canvas id=\"" + chartId + "\" width=\"400\" height=\"200\"></canvas>";
+                            chartsDiv.appendChild(chartContainer);
+
+                            const ctx = document.getElementById(chartId).getContext('2d');
+                            charts[chartId] = new Chart(ctx, {
+                                type: 'line',
+                                data: {
+                                    labels: [], // Initialize with empty labels
+                                    datasets: [
+                                        {
+                                            label: '50th Percentile Latency (ms)',
+                                            data: [],
+                                            borderColor: 'rgba(255, 99, 132, 1)',
+                                            borderWidth: 2,
+                                            fill: false,
+                                        },
+                                        {
+                                            label: '90th Percentile Latency (ms)',
+                                            data: [],
+                                            borderColor: 'rgba(54, 162, 235, 1)',
+                                            borderWidth: 2,
+                                            fill: false,
+                                        }
+                                    ]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    scales: {
+                                        x: { 
+                                            title: { 
+                                                display: true, 
+                                                text: 'Time' 
+                                            },
+                                            ticks: {
+                                                autoSkip: true,
+                                                maxTicksLimit: 10,
+                                                maxRotation: 0
+                                            }
+                                        },
+                                        y: { 
+                                            title: { 
+                                                display: true, 
+                                                text: 'Latency (ms)' 
+                                            },
+                                            beginAtZero: true
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        
+                        const chart = charts[chartId];
+                        const now = new Date().toLocaleTimeString(); // Current time as label
+                        chart.data.labels.push(now);
+                        chart.data.datasets[0].data.push(endpointData['50thPercentileLatency']);
+                        chart.data.datasets[1].data.push(endpointData['90thPercentileLatency']);
+                        
+                        // Data down-sampling if more than 50 points
+                        if (chart.data.labels.length > 50) {
+                            chart.data.labels = downsample(chart.data.labels, 50);
+                            chart.data.datasets[0].data = downsample(chart.data.datasets[0].data, 35);
+                            chart.data.datasets[1].data = downsample(chart.data.datasets[1].data, 35);
+                        }
+                        
+                        chart.update();
+                    }
+                } catch (error) {
+                    console.error('Error fetching metrics:', error);
+                }
+            }
+
+            function downsample(data, maxLength) {
+                if (data.length <= maxLength) return data;
+                const interval = Math.ceil(data.length / maxLength);
+                return data.filter((_, index) => index % interval === 0);
+            }
+
+            setInterval(fetchMetrics, 1000); // Refresh every second
+        </script>
+    </div>
+</body>
+</html>
+
+
+`
+
+func startDashboard() {
+	// Handle requests to the root path with the HTML content
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(htmlContent))
+	})
+
+	// Serve metrics at a different endpoint
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metrics1 := make(map[string]map[string]interface{})
+		metricsMap.Range(func(key, value interface{}) bool {
+			endpointMetrics := value.(*metrics.EndpointMetrics)
+			metrics1[key.(string)] = map[string]interface{}{
+				"50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
+				"90thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.9),
+			}
+			return true
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(metrics1)
+		fmt.Printf("%v", metrics1)
+	})
+
+	log.Println("Dashboard running at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
