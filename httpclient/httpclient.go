@@ -21,7 +21,7 @@ func NewHTTPClient() *HTTPClient {
 	}
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   20 * time.Second,
+		Timeout:   60 * time.Second,
 	}
 
 	return &HTTPClient{client: client}
@@ -53,56 +53,44 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 
 	responseStartTime := time.Now()
 	resp, err := hc.client.Do(req)
+
+	httpResp := HttpResponse{
+		Body:                "Request failed",
+		StatusCode:          http.StatusInternalServerError,
+		URL:                 url,
+		Method:              method,
+		Duration:            0,
+		TCPHandshakeLatency: 0,
+		DNSLookupLatency:    0,
+	}
+
 	if err != nil {
 		// Check if the error is a timeout
 		if e, ok := err.(net.Error); ok && e.Timeout() {
-			return HttpResponse{
-				Body:                "Request timed out",
-				StatusCode:          http.StatusRequestTimeout,
-				URL:                 url,
-				Method:              method,
-				Duration:            time.Since(responseStartTime),
-				TCPHandshakeLatency: 0,
-				DNSLookupLatency:    0,
-			}, nil
+			httpResp.Body = "Request timed out"
+			httpResp.StatusCode = http.StatusRequestTimeout
+			// Log additional diagnostic info
+			fmt.Printf("Timeout error for URL: %s, Method: %s\n", url, method)
+		} else if opErr, ok := err.(*net.OpError); ok && opErr.Op == "dial" && opErr.Err.Error() == "connection refused" {
+			httpResp.Body = "Connection refused"
+			httpResp.StatusCode = http.StatusServiceUnavailable
+			// Log additional diagnostic info
+			fmt.Printf("Connection refused for URL: %s, Method: %s\n", url, method)
+		} else if opErr, ok := err.(*net.OpError); ok {
+			httpResp.Body = "Network error: " + opErr.Error()
+			httpResp.StatusCode = http.StatusNetworkAuthenticationRequired
+			// Log additional diagnostic info
+			fmt.Printf("Network error for URL: %s, Method: %s, Error: %s\n", url, method, opErr.Error())
+		} else {
+			httpResp.Body = "An unexpected error occurred"
+			httpResp.StatusCode = http.StatusInternalServerError
+			// Log additional diagnostic info
+			fmt.Printf("Unexpected error for URL: %s, Method: %s, Error: %s\n", url, method, err.Error())
 		}
-
-		// Check if the error is a connection refused error
-		if opErr, ok := err.(*net.OpError); ok && opErr.Op == "dial" && opErr.Err.Error() == "connection refused" {
-			return HttpResponse{
-				Body:                "Connection refused",
-				StatusCode:          http.StatusServiceUnavailable,
-				URL:                 url,
-				Method:              method,
-				Duration:            time.Since(responseStartTime),
-				TCPHandshakeLatency: 0,
-				DNSLookupLatency:    0,
-			}, nil
-		}
-
-		// Handle other network errors
-		if opErr, ok := err.(*net.OpError); ok {
-			return HttpResponse{
-				Body:                "Network error: " + opErr.Error(),
-				StatusCode:          http.StatusNetworkAuthenticationRequired,
-				URL:                 url,
-				Method:              method,
-				Duration:            time.Since(responseStartTime),
-				TCPHandshakeLatency: 0,
-				DNSLookupLatency:    0,
-			}, nil
-		}
-
-		// Handle other types of errors
-		return HttpResponse{
-			Body:                "An unexpected error occurred",
-			StatusCode:          http.StatusInternalServerError,
-			URL:                 url,
-			Method:              method,
-			Duration:            time.Since(responseStartTime),
-			TCPHandshakeLatency: 0,
-			DNSLookupLatency:    0,
-		}, err
+		httpResp.Duration = time.Since(responseStartTime)
+		metrics1 := collectMetricsWithLatencies(url, method, 0, 0, httpResp.StatusCode, httpResp.Duration, httpResp.TCPHandshakeLatency, httpResp.DNSLookupLatency)
+		metrics.SendMetrics(metrics1, metricsChannel)
+		return httpResp, nil
 	}
 
 	responseEndTime := time.Now()

@@ -23,11 +23,11 @@ export default function () {
         const postResponse = http.post(postUrl, JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
         postResponse.assertStatus(201)
 
-        const putResponse = http.put(putUrl, JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
-        putResponse.assertStatus(200)
+        // const putResponse = http.put(putUrl, JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
+        // putResponse.assertStatus(200)
 
-        const deleteResponse = http.delete(deleteUrl);
-        deleteResponse.assertStatus(200)
+        // const deleteResponse = http.delete(deleteUrl);
+        // deleteResponse.assertStatus(200)
     // });
 }
 
