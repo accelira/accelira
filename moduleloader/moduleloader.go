@@ -87,6 +87,10 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 			if resp.StatusCode != expectedStatus {
 				// Send metrics for failed assertion
 
+				if len(fmt.Sprintf("%s %s", resp.Method, resp.URL)) < 5 {
+					fmt.Printf("blank error")
+				}
+
 				metricsData := metrics.Metrics{
 					EndpointMetricsMap: map[string]*metrics.EndpointMetrics{
 						fmt.Sprintf("%s %s", resp.Method, resp.URL): {
@@ -98,7 +102,6 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 					},
 				}
 				metrics.SendMetrics(metricsData, metricsChan)
-				// panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
 			}
 			return map[string]interface{}{
 				"response": resp,
