@@ -58,42 +58,26 @@ func SetupRequire(config *Config, metricsChan chan<- metrics.Metrics) func(modul
 
 // createHTTPModule handles HTTP requests (GET, POST, PUT, DELETE) and sends metrics.
 func createHTTPModule(metricsChan chan<- metrics.Metrics) map[string]interface{} {
+	client := httpclient.NewHTTPClient()
 	return map[string]interface{}{
 		"get": func(url string) map[string]interface{} {
-			resp, err := httpclient.HttpRequest(url, "GET", nil, metricsChan)
+			resp, err := client.DoRequest(url, "GET", nil, metricsChan)
 			return createResponseObject(resp, err, metricsChan)
 		},
 		"post": func(url string, body string) map[string]interface{} {
-			resp, err := httpclient.HttpRequest(url, "POST", strings.NewReader(body), metricsChan)
+			resp, err := client.DoRequest(url, "POST", strings.NewReader(body), metricsChan)
 			return createResponseObject(resp, err, metricsChan)
 		},
 		"put": func(url string, body string) map[string]interface{} {
-			resp, err := httpclient.HttpRequest(url, "PUT", strings.NewReader(body), metricsChan)
+			resp, err := client.DoRequest(url, "PUT", strings.NewReader(body), metricsChan)
 			return createResponseObject(resp, err, metricsChan)
 		},
 		"delete": func(url string) map[string]interface{} {
-			resp, err := httpclient.HttpRequest(url, "DELETE", nil, metricsChan)
+			resp, err := client.DoRequest(url, "DELETE", nil, metricsChan)
 			return createResponseObject(resp, err, metricsChan)
 		},
 	}
 }
-
-// func createResponseObject(resp httpclient.HttpResponse, err error) map[string]interface{} {
-// 	return map[string]interface{}{
-// 		"response": resp,
-// 		"error":    err,
-// 		"assertStatus": func(expectedStatus int) map[string]interface{} {
-// 			if resp.StatusCode != expectedStatus {
-// 				panic(fmt.Sprintf("Expected status %d but got %d", expectedStatus, resp.StatusCode))
-
-// 			}
-// 			return map[string]interface{}{
-// 				"response": resp,
-// 				"error":    err,
-// 			}
-// 		},
-// 	}
-// }
 
 func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan chan<- metrics.Metrics) map[string]interface{} {
 	return map[string]interface{}{
@@ -109,13 +93,7 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 							URL:              resp.URL,
 							Method:           resp.Method,
 							StatusCodeCounts: map[int]int{resp.StatusCode: 1},
-							// ResponseTimes:      tdigest.New(),
-							// Requests: 0,
-							// TotalDuration:      resp.Duration,
-							// TotalResponseTime:  resp.Duration,
-							// TotalBytesReceived: len(resp.Body),
-							// TotalBytesSent: len(resp.URL),
-							Errors: 1,
+							Errors:           1,
 						},
 					},
 				}

@@ -9,26 +9,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// func RunScript(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config) {
-// 	defer wg.Done()
-
-// 	vm := goja.New()
-// 	moduleloader.SetupConsoleModule(vm)
-// 	module := moduleloader.InitializeModuleExport(vm)
-// 	vm.Set("require", moduleloader.SetupRequire(config, metricsChan))
-
-// 	_, err := vm.RunScript("script.js", fmt.Sprintf("(function() { %s })();", script))
-// 	if err != nil {
-// 		fmt.Println("Error running script:", err)
-// 	}
-
-// 	iterations := config.Iterations
-// 	for i := 0; i < iterations; i++ {
-// 		// Execute the default exported function
-// 		ExecuteExportedFunction(vm, module)
-// 	}
-// }
-
 func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error) {
 	vm := goja.New()
 	config := &moduleloader.Config{}
@@ -96,24 +76,6 @@ func (p *VMPool) Put(vm *goja.Runtime) {
 	p.pool <- vm
 }
 
-// func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool) {
-// 	defer wg.Done()
-
-// 	vm := vmPool.Get()
-// 	defer vmPool.Put(vm)
-
-// 	module := moduleloader.InitializeModuleExport(vm)
-// 	_, err := vm.RunScript("script.js", fmt.Sprintf("(function() { %s })();", script))
-// 	if err != nil {
-// 		fmt.Println("Error running script:", err)
-// 	}
-
-// 	iterations := config.Iterations
-// 	for i := 0; i < iterations; i++ {
-// 		ExecuteExportedFunction(vm, module)
-// 	}
-// }
-
 func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool) {
 	defer wg.Done()
 
@@ -129,13 +91,8 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 
 	iterations := config.Iterations
 
-	// start := time.Now() // Start timing
-
 	for i := 0; i < iterations; i++ {
 		ExecuteExportedFunction(vm, module)
 	}
 
-	// elapsed := time.Since(start) // End timing
-
-	// fmt.Printf("Execution time for ExecuteExportedFunction: %s\n", elapsed)
 }

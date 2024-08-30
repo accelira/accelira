@@ -127,6 +127,7 @@ func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
 	atomic.AddInt32(&metricsReceived, 1)
 
 	existingMetric.Requests += endpointMetric.Requests
+	existingMetric.ResponseTimes = endpointMetric.ResponseTimes
 	existingMetric.TotalDuration += endpointMetric.TotalDuration
 	existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
 	existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
@@ -318,101 +319,115 @@ const htmlContent = `
 <body>
     <div class="container">
         <h1>Accelira Performance Dashboard</h1>
-        <div id="metrics">Loading metrics...</div>
         <div id="charts"></div>
+        <div id="metrics">Loading metrics...</div>
         <div class="footer">
             <p>Accelira Dashboard - Real-time Metrics Visualization</p>
         </div>
         <script>
             const charts = {};
 
-            async function fetchMetrics() {
-                try {
-                    const response = await fetch('/metrics');
-                    const data = await response.json();
-                    const metricsDiv = document.getElementById('metrics');
-                    metricsDiv.textContent = JSON.stringify(data, null, 2);
+ async function fetchMetrics() {
+    try {
+        const response = await fetch('/metrics');
 
-                    const chartsDiv = document.getElementById('charts');
-                    
-                    for (let endpoint in data) {
-                        const endpointData = data[endpoint];
-                        const chartId = "chart-" + endpoint.replace(/[^a-zA-Z0-9]/g, '-');
-                        
-                        if (!charts[chartId]) {
-                            const chartContainer = document.createElement('div');
-                            chartContainer.className = 'chart-container';
-                            chartContainer.innerHTML = "<h2>" + endpoint + "</h2><canvas id=\"" + chartId + "\" width=\"400\" height=\"200\"></canvas>";
-                            chartsDiv.appendChild(chartContainer);
+		        if (!response.ok) {
+            throw new Error('Failed to fetch metrics');
+        }
+        const data = await response.json();
+        const metricsDiv = document.getElementById('metrics');
+        metricsDiv.textContent = JSON.stringify(data, null, 2);
 
-                            const ctx = document.getElementById(chartId).getContext('2d');
-                            charts[chartId] = new Chart(ctx, {
-                                type: 'line',
-                                data: {
-                                    labels: [], // Initialize with empty labels
-                                    datasets: [
-                                        {
-                                            label: '50th Percentile Latency (ms)',
-                                            data: [],
-                                            borderColor: 'rgba(255, 99, 132, 1)',
-                                            borderWidth: 2,
-                                            fill: false,
-                                        },
-                                        {
-                                            label: '90th Percentile Latency (ms)',
-                                            data: [],
-                                            borderColor: 'rgba(54, 162, 235, 1)',
-                                            borderWidth: 2,
-                                            fill: false,
-                                        }
-                                    ]
+        const chartsDiv = document.getElementById('charts');
+        
+        for (let endpoint in data) {
+            const endpointData = data[endpoint];
+            const chartId = "chart-" + endpoint.replace(/[^a-zA-Z0-9]/g, '-');
+            
+            if (!charts[chartId]) {
+                const chartContainer = document.createElement('div');
+                chartContainer.className = 'chart-container';
+                chartContainer.innerHTML = "<h2>" + endpoint + "</h2><canvas id=\"" + chartId + "\" width=\"400\" height=\"200\"></canvas>";
+                chartsDiv.appendChild(chartContainer);
+
+                const ctx = document.getElementById(chartId).getContext('2d');
+                charts[chartId] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [], // Initialize with empty labels
+                        datasets: [
+                            {
+                                label: '50th Percentile Latency (ms)',
+                                data: [],
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 2,
+                                fill: false,
+                            },
+                            {
+                                label: '90th Percentile Latency (ms)',
+                                data: [],
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 2,
+                                fill: false,
+                            },
+                            {
+                                label: 'Real-time Response (ms)',
+                                data: [],
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 2,
+                                fill: false,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { 
+                                title: { 
+                                    display: true, 
+                                    text: 'Time' 
                                 },
-                                options: {
-                                    responsive: true,
-                                    maintainAspectRatio: false,
-                                    scales: {
-                                        x: { 
-                                            title: { 
-                                                display: true, 
-                                                text: 'Time' 
-                                            },
-                                            ticks: {
-                                                autoSkip: true,
-                                                maxTicksLimit: 10,
-                                                maxRotation: 0
-                                            }
-                                        },
-                                        y: { 
-                                            title: { 
-                                                display: true, 
-                                                text: 'Latency (ms)' 
-                                            },
-                                            beginAtZero: true
-                                        }
-                                    }
+                                ticks: {
+                                    autoSkip: true,
+                                    maxTicksLimit: 10,
+                                    maxRotation: 0
                                 }
-                            });
+                            },
+                            y: { 
+                                title: { 
+                                    display: true, 
+                                    text: 'Latency (ms)' 
+                                },
+                                beginAtZero: true
+                            }
                         }
-                        
-                        const chart = charts[chartId];
-                        const now = new Date().toLocaleTimeString(); // Current time as label
-                        chart.data.labels.push(now);
-                        chart.data.datasets[0].data.push(endpointData['50thPercentileLatency']);
-                        chart.data.datasets[1].data.push(endpointData['90thPercentileLatency']);
-                        
-                        // Data down-sampling if more than 50 points
-                        if (chart.data.labels.length > 50) {
-                            chart.data.labels = downsample(chart.data.labels, 50);
-                            chart.data.datasets[0].data = downsample(chart.data.datasets[0].data, 35);
-                            chart.data.datasets[1].data = downsample(chart.data.datasets[1].data, 35);
-                        }
-                        
-                        chart.update();
                     }
-                } catch (error) {
-                    console.error('Error fetching metrics:', error);
-                }
+                });
             }
+            
+            const chart = charts[chartId];
+            const now = new Date().toLocaleTimeString(); // Current time as label
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(endpointData['50thPercentileLatency']);
+            chart.data.datasets[1].data.push(endpointData['90thPercentileLatency']);
+            chart.data.datasets[2].data.push(endpointData['realtimeResponse']);
+            
+            // Data down-sampling if more than 50 points
+            if (chart.data.labels.length > 50) {
+                chart.data.labels = downsample(chart.data.labels, 50);
+                chart.data.datasets[0].data = downsample(chart.data.datasets[0].data, 35);
+                chart.data.datasets[1].data = downsample(chart.data.datasets[1].data, 35);
+                chart.data.datasets[2].data = downsample(chart.data.datasets[2].data, 35);
+            }
+            
+            chart.update();
+        }
+    } catch (error) {
+        console.error('Error fetching metrics:', error);
+    }
+}
+
 
             function downsample(data, maxLength) {
                 if (data.length <= maxLength) return data;
@@ -420,11 +435,12 @@ const htmlContent = `
                 return data.filter((_, index) => index % interval === 0);
             }
 
-            setInterval(fetchMetrics, 1000); // Refresh every second
+            setInterval(fetchMetrics, 5000); // Refresh every second
         </script>
     </div>
 </body>
 </html>
+
 
 
 `
@@ -444,12 +460,12 @@ func startDashboard() {
 			metrics1[key.(string)] = map[string]interface{}{
 				"50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
 				"90thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.9),
+				"realtimeResponse":      endpointMetrics.ResponseTimes.Milliseconds(),
 			}
 			return true
 		})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(metrics1)
-		fmt.Printf("%v", metrics1)
 	})
 
 	log.Println("Dashboard running at http://localhost:8080")
