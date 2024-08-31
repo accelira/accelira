@@ -1,34 +1,50 @@
 package httpclient
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"sync"
 	"time"
 
 	"github.com/accelira/accelira/metrics"
 )
 
 type HTTPClient struct {
-	client *http.Client
+	client     *http.Client
+	bufferPool sync.Pool
 }
 
 func NewHTTPClient() *HTTPClient {
 	transport := &http.Transport{
-		DisableKeepAlives: false,
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+		MaxIdleConnsPerHost: 10,
 	}
+
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   60 * time.Second,
 	}
 
-	return &HTTPClient{client: client}
+	return &HTTPClient{
+		client: client,
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, 32*1024) // 32KB buffer
+				return &buf
+			},
+		},
+	}
 }
 
 func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
-	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, GotFirstResponseByteTime time.Time
+	var dnsStart, dnsEnd, connectStart, connectEnd, wroteRequestTime, gotFirstResponseByteTime time.Time
 
 	trace := &httptrace.ClientTrace{
 		DNSStart:     func(info httptrace.DNSStartInfo) { dnsStart = time.Now() },
@@ -36,89 +52,108 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 		ConnectStart: func(network, addr string) { connectStart = time.Now() },
 		ConnectDone:  func(network, addr string, err error) { connectEnd = time.Now() },
 		GotFirstResponseByte: func() {
-			GotFirstResponseByteTime = time.Now()
+			gotFirstResponseByteTime = time.Now()
 		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			wroteRequestTime = time.Now()
 		},
 	}
 
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), method, url, body)
 	if err != nil {
-		return HttpResponse{}, err
+		return handleRequestError(err, url, method, time.Duration(0), metricsChannel)
 	}
 
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
 
-	responseStartTime := time.Now()
+	startTime := time.Now()
 	resp, err := hc.client.Do(req)
-
-	httpResp := HttpResponse{
-		Body:                "Request failed",
-		StatusCode:          http.StatusInternalServerError,
-		URL:                 url,
-		Method:              method,
-		Duration:            0,
-		TCPHandshakeLatency: 0,
-		DNSLookupLatency:    0,
-	}
+	duration := time.Since(startTime)
 
 	if err != nil {
-		// Check if the error is a timeout
-		if e, ok := err.(net.Error); ok && e.Timeout() {
-			httpResp.Body = "Request timed out"
-			httpResp.StatusCode = http.StatusRequestTimeout
-			// Log additional diagnostic info
-			fmt.Printf("Timeout error for URL: %s, Method: %s\n", url, method)
-		} else if opErr, ok := err.(*net.OpError); ok && opErr.Op == "dial" && opErr.Err.Error() == "connection refused" {
-			httpResp.Body = "Connection refused"
-			httpResp.StatusCode = http.StatusServiceUnavailable
-			// Log additional diagnostic info
-			fmt.Printf("Connection refused for URL: %s, Method: %s\n", url, method)
-		} else if opErr, ok := err.(*net.OpError); ok {
-			httpResp.Body = "Network error: " + opErr.Error()
-			httpResp.StatusCode = http.StatusNetworkAuthenticationRequired
-			// Log additional diagnostic info
-			fmt.Printf("Network error for URL: %s, Method: %s, Error: %s\n", url, method, opErr.Error())
-		} else {
-			httpResp.Body = "An unexpected error occurred"
-			httpResp.StatusCode = http.StatusInternalServerError
-			// Log additional diagnostic info
-			fmt.Printf("Unexpected error for URL: %s, Method: %s, Error: %s\n", url, method, err.Error())
-		}
-		httpResp.Duration = time.Since(responseStartTime)
-		metrics1 := collectMetricsWithLatencies(url, method, 0, 0, httpResp.StatusCode, httpResp.Duration, httpResp.TCPHandshakeLatency, httpResp.DNSLookupLatency)
-		metrics.SendMetrics(metrics1, metricsChannel)
-		return httpResp, nil
+		return handleRequestError(err, url, method, duration, metricsChannel)
 	}
-
-	responseEndTime := time.Now()
-	totalResponseTime := responseEndTime.Sub(responseStartTime)
-
 	defer resp.Body.Close()
 
-	duration := GotFirstResponseByteTime.Sub(wroteRequestTime)
-	responseBody, err := io.ReadAll(resp.Body)
+	buf := hc.bufferPool.Get().(*[]byte)
+	defer hc.bufferPool.Put(buf)
+
+	var responseBody bytes.Buffer
+	_, err = io.CopyBuffer(&responseBody, resp.Body, *buf)
 	if err != nil {
 		return HttpResponse{}, err
 	}
 
 	tcpHandshakeLatency := connectEnd.Sub(connectStart)
 	dnsLookupLatency := dnsEnd.Sub(dnsStart)
+	duration = gotFirstResponseByteTime.Sub(wroteRequestTime)
 
-	metrics1 := collectMetricsWithLatencies(url, method, len(responseBody), len(req.URL.String()), resp.StatusCode, totalResponseTime, tcpHandshakeLatency, dnsLookupLatency)
-	metrics.SendMetrics(metrics1, metricsChannel)
-
-	return HttpResponse{
-		Body:                string(responseBody),
+	httpResp := HttpResponse{
+		Body:                responseBody.String(),
 		StatusCode:          resp.StatusCode,
 		URL:                 url,
 		Method:              method,
 		Duration:            duration,
 		TCPHandshakeLatency: tcpHandshakeLatency,
 		DNSLookupLatency:    dnsLookupLatency,
-	}, nil
+	}
+
+	metrics1 := collectMetricsWithLatencies(url, method, responseBody.Len(), len(req.URL.String()), resp.StatusCode, duration, tcpHandshakeLatency, dnsLookupLatency)
+	metrics.SendMetrics(metrics1, metricsChannel)
+
+	return httpResp, nil
+}
+
+func handleRequestError(err error, url, method string, duration time.Duration, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
+	var statusCode int
+	var body string
+
+	switch e := err.(type) {
+	case net.Error:
+		if e.Timeout() {
+			body = "Request timed out"
+			statusCode = http.StatusRequestTimeout
+		} else {
+			body = "Network error: " + e.Error()
+			statusCode = http.StatusNetworkAuthenticationRequired
+		}
+	case *net.OpError:
+		if e.Op == "dial" && e.Err.Error() == "connection refused" {
+			body = "Connection refused"
+			statusCode = http.StatusServiceUnavailable
+		} else {
+			body = "Network error: " + e.Error()
+			statusCode = http.StatusNetworkAuthenticationRequired
+		}
+	default:
+		body = "An unexpected error occurred"
+		statusCode = http.StatusInternalServerError
+	}
+
+	metrics1 := collectMetricsWithLatencies(url, method, 0, 0, statusCode, duration, 0, 0)
+	metrics.SendMetrics(metrics1, metricsChannel)
+
+	return HttpResponse{Body: body, StatusCode: statusCode, URL: url, Method: method, Duration: duration}, nil
+}
+
+func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, statusCode int, duration, tcpHandshakeLatency, dnsLookupLatency time.Duration) metrics.Metrics {
+	key := fmt.Sprintf("%s %s", method, url)
+
+	epMetrics := &metrics.EndpointMetrics{
+		URL:                 url,
+		Method:              method,
+		StatusCodeCounts:    map[int]int{statusCode: 1},
+		ResponseTimes:       duration,
+		TCPHandshakeLatency: tcpHandshakeLatency,
+		DNSLookupLatency:    dnsLookupLatency,
+		Requests:            1,
+		TotalDuration:       duration,
+		TotalResponseTime:   duration,
+		TotalBytesReceived:  bytesReceived,
+		TotalBytesSent:      bytesSent,
+	}
+
+	return metrics.Metrics{EndpointMetricsMap: map[string]*metrics.EndpointMetrics{key: epMetrics}}
 }
 
 type HttpResponse struct {
@@ -129,29 +164,4 @@ type HttpResponse struct {
 	Duration            time.Duration
 	TCPHandshakeLatency time.Duration
 	DNSLookupLatency    time.Duration
-}
-
-func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, statusCode int, duration, tcpHandshakeLatency, dnsLookupLatency time.Duration) metrics.Metrics {
-	key := fmt.Sprintf("%s %s", method, url)
-
-	epMetrics := &metrics.EndpointMetrics{
-		URL:                 url,
-		Method:              method,
-		StatusCodeCounts:    make(map[int]int),
-		ResponseTimes:       0,
-		TCPHandshakeLatency: 0,
-		DNSLookupLatency:    0,
-	}
-
-	epMetrics.Requests = 1
-	epMetrics.TotalDuration = duration
-	epMetrics.TotalResponseTime = duration
-	epMetrics.TotalBytesReceived = bytesReceived
-	epMetrics.TotalBytesSent = bytesSent
-	epMetrics.StatusCodeCounts[statusCode] = 1
-	epMetrics.ResponseTimes = duration
-	epMetrics.TCPHandshakeLatency = tcpHandshakeLatency
-	epMetrics.DNSLookupLatency = dnsLookupLatency
-
-	return metrics.Metrics{EndpointMetricsMap: map[string]*metrics.EndpointMetrics{key: epMetrics}}
 }

@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "net/http/pprof"
-
 	"github.com/accelira/accelira/dashboard"
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"

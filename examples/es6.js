@@ -17,11 +17,11 @@ export default function () {
         const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
         const deleteUrl = "https://jsonplaceholder.typicode.com/posts/1";
 
-        const getResponse = http.get("https://www.google.com");
-        getResponse.assertStatus(201)
+        // const getResponse = http.get("https://www.google.com");
+        // getResponse.assertStatus(429)
 
-        const postResponse = http.post(postUrl, JSON.stringify({ title: "foo", body: "bar", userId: 1 }));
-        postResponse.assertStatus(201)
+        const getResponse1 = http.get("https://reqres.in/api/users");
+        getResponse1.assertStatus(200)
 
         // const putResponse = http.put(putUrl, JSON.stringify({ id: 1, title: "foo", body: "bar", userId: 1 }));
         // putResponse.assertStatus(200)
