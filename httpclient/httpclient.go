@@ -22,7 +22,7 @@ type HTTPClient struct {
 func NewHTTPClient() *HTTPClient {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
+		IdleConnTimeout:     30 * time.Second,
 		DisableKeepAlives:   false,
 		MaxIdleConnsPerHost: 10,
 	}
@@ -86,7 +86,7 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 
 	tcpHandshakeLatency := connectEnd.Sub(connectStart)
 	dnsLookupLatency := dnsEnd.Sub(dnsStart)
-	duration = gotFirstResponseByteTime.Sub(wroteRequestTime)
+	gotFirstResponseByteTime.Sub(wroteRequestTime)
 
 	httpResp := HttpResponse{
 		Body:                responseBody.String(),

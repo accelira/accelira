@@ -16,7 +16,7 @@ func GenerateReport1(metricsMap *sync.Map) {
 	printSummary(metricsMap)
 	color.New(color.FgGreen).Add(color.Bold).Println("\nDetailed Report:")
 	t := tabby.New()
-	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "95th % Latency", "TCP Handshake Latency", "DNS Lookup Latency", "Status Codes")
+	t.AddHeader("Endpoint", "Req.", "Errs", "Avg. Resp. Time", "50th % Latency", "90th % Latency", "TCP Handshake Latency", "DNS Lookup Latency", "Status Codes")
 
 	metricsMap.Range(func(key, value interface{}) bool {
 		endpoint := key.(string)
@@ -28,7 +28,7 @@ func GenerateReport1(metricsMap *sync.Map) {
 		}
 
 		percentile50 := epMetrics.ResponseTimesTDigest.Quantile(0.5)
-		percentile95 := epMetrics.ResponseTimesTDigest.Quantile(0.99)
+		percentile95 := epMetrics.ResponseTimesTDigest.Quantile(0.9)
 
 		t.AddLine(
 			endpoint,
