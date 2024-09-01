@@ -11,5 +11,4 @@ export default function () {
     });
 
     // Optional: Wait for a short period to simulate user think time
-    sleep(1);
 }

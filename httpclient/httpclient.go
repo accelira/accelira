@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/accelira/accelira/metrics"
@@ -21,30 +20,30 @@ type HTTPClient struct {
 }
 
 func NewHTTPClient() *HTTPClient {
-	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-		Control: func(network, address string, c syscall.RawConn) error {
-			var err error
-			c.Control(func(fd uintptr) {
-				// Set send buffer size (e.g., 1MB)
-				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_SNDBUF, 1024*1024)
-				if err != nil {
-					return
-				}
-				// Set receive buffer size (e.g., 1MB)
-				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1024*1024)
-			})
-			return err
-		},
-	}
+	// dialer := &net.Dialer{
+	// 	Timeout:   10 * time.Second,
+	// 	KeepAlive: 10 * time.Second,
+	// 	Control: func(network, address string, c syscall.RawConn) error {
+	// 		var err error
+	// 		c.Control(func(fd uintptr) {
+	// 			// Set send buffer size (e.g., 1MB)
+	// 			err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_SNDBUF, 1024*1024)
+	// 			if err != nil {
+	// 				return
+	// 			}
+	// 			// Set receive buffer size (e.g., 1MB)
+	// 			err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1024*1024)
+	// 		})
+	// 		return err
+	// 	},
+	// }
 
 	transport := &http.Transport{
-		DialContext:         dialer.DialContext,
+		// DialContext:         dialer.DialContext,
 		MaxIdleConns:        100,
-		IdleConnTimeout:     30 * time.Second,
+		IdleConnTimeout:     10 * time.Second,
 		DisableKeepAlives:   false,
-		MaxIdleConnsPerHost: 10,
+		MaxIdleConnsPerHost: 100,
 	}
 
 	client := &http.Client{

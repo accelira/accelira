@@ -8,6 +8,8 @@ import { options } from './options.js';
 config.setIterations(options.iterations);
 config.setRampUpRate(options.rampUpRate);
 config.setConcurrentUsers(options.concurrentUsers);
+config.setDuration(options.duration);
+
 
 export default function () {
 

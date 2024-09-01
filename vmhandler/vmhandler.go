@@ -3,6 +3,7 @@ package vmhandler
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"
@@ -76,6 +77,27 @@ func (p *VMPool) Put(vm *goja.Runtime) {
 	p.pool <- vm
 }
 
+// func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool) {
+// 	defer wg.Done()
+
+// 	vm := vmPool.Get()
+// 	defer vmPool.Put(vm)
+
+// 	module := moduleloader.InitializeModuleExport(vm)
+// 	_, err := vm.RunScript("script.js", fmt.Sprintf("(function() { %s })();", script))
+// 	if err != nil {
+// 		fmt.Println("Error running script:", err)
+// 		return
+// 	}
+
+// 	iterations := config.Iterations
+
+// 	for i := 0; i < iterations; i++ {
+// 		ExecuteExportedFunction(vm, module)
+// 	}
+
+// }
+
 func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool) {
 	defer wg.Done()
 
@@ -89,10 +111,11 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 		return
 	}
 
-	iterations := config.Iterations
+	// Duration for which the script should run
+	duration := config.Duration
+	endTime := time.Now().Add(duration)
 
-	for i := 0; i < iterations; i++ {
+	for time.Now().Before(endTime) {
 		ExecuteExportedFunction(vm, module)
 	}
-
 }

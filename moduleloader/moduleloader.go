@@ -21,6 +21,7 @@ type Config struct {
 	Iterations      int
 	RampUpRate      int
 	ConcurrentUsers int
+	Duration        time.Duration
 }
 
 func createConfigModule(config *Config) map[string]interface{} {
@@ -31,6 +32,11 @@ func createConfigModule(config *Config) map[string]interface{} {
 		"getIterations":      func() int { return config.Iterations },
 		"getRampUpRate":      func() int { return config.RampUpRate },
 		"getConcurrentUsers": func() int { return config.ConcurrentUsers },
+		"setDuration": func(duration string) {
+			parsedDuration, _ := time.ParseDuration(duration)
+			config.Duration = parsedDuration
+		},
+		"getDuration": func() time.Duration { return config.Duration },
 	}
 }
 
