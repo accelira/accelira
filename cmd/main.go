@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,10 +79,10 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var totalTimeElapsed int64
-	var tickCount int32
+	// var totalTimeElapsed int64
+	// var tickCount int32
 
-	startTime := time.Now()
+	// startTime := time.Now()
 
 	for {
 		select {
@@ -105,15 +106,19 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 				}
 				mutex.Unlock()
 			}
-		case <-ticker.C:
-			// Print progress every second
-			currentCount := atomic.LoadInt32(&metricsReceived)
-			elapsed := time.Since(startTime).Seconds()
-			atomic.AddInt64(&totalTimeElapsed, int64(elapsed))
-			atomic.AddInt32(&tickCount, 1)
-			averageDuration := float64(totalTimeElapsed) / float64(tickCount)
-			fmt.Printf("\rResponses received: %d | Avg latency: %.2f sec", currentCount, averageDuration)
-			startTime = time.Now() // Reset start time for next interval
+			// case <-ticker.C:
+			// 	// Print progress every second
+			// 	currentCount := atomic.LoadInt32(&metricsReceived)
+			// 	elapsed := time.Since(startTime).Seconds()
+			// 	atomic.AddInt64(&totalTimeElapsed, int64(elapsed))
+			// 	atomic.AddInt32(&tickCount, 1)
+			// 	averageDuration := float64(totalTimeElapsed) / float64(tickCount)
+			// 	// Move cursor to the line below
+			// 	fmt.Print("\033[998;0H") // Move to row 1, column 0 (line below the progress bar)
+			// 	fmt.Print("\033[K")      // Clear the line from the cursor to the end of the line
+			// 	fmt.Printf("Responses received: %d | Avg latency: %.2f sec", currentCount, averageDuration)
+
+			// 	startTime = time.Now() // Reset start time for next interval
 		}
 	}
 }
@@ -227,11 +232,55 @@ func displayConfig(config *moduleloader.Config) {
 	fmt.Printf("Concurrent Users: %d\nIterations: %d\nRamp-up Rate: %d\nDuration: %s\n", config.ConcurrentUsers, config.Iterations, config.RampUpRate, config.Duration)
 }
 
+// func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
+// 	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
+// 	checkError("Error initializing VM pool\n", err)
+
+// 	var waitGroup sync.WaitGroup
+
+// 	for i := 0; i < config.ConcurrentUsers; i++ {
+// 		waitGroup.Add(1)
+// 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
+// 		if config.RampUpRate > 0 {
+// 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
+// 		}
+// 	}
+
+// 	waitGroup.Wait()
+// }
+
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
 	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
 	checkError("Error initializing VM pool\n", err)
 
 	var waitGroup sync.WaitGroup
+
+	// Start the progress bar goroutine
+	done := make(chan struct{})
+	go func() {
+		startTime := time.Now()
+		progressBarLength := 50 // Length of the progress bar
+
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				elapsed := time.Since(startTime)
+				progress := elapsed.Seconds() / config.Duration.Seconds()
+				if progress > 1.0 {
+					progress = 1.0
+				}
+				filledLength := int(progress * float64(progressBarLength))
+				bar := fmt.Sprintf("[%s%s]", strings.Repeat("=", filledLength), strings.Repeat("-", progressBarLength-filledLength))
+				fmt.Print("\033[999;0H") // Move to row 999, column 0, which will be the last line
+				fmt.Print("\033[K")      // Clear the line from the cursor to the end of the line
+				fmt.Printf("%s Elapsed: %.2f sec / %.2f sec, Responses received %d", bar, elapsed.Seconds(), config.Duration.Seconds(), atomic.LoadInt32(&metricsReceived))
+
+				time.Sleep(100 * time.Millisecond) // Update every 100ms
+			}
+		}
+	}()
 
 	for i := 0; i < config.ConcurrentUsers; i++ {
 		waitGroup.Add(1)
@@ -242,6 +291,10 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	}
 
 	waitGroup.Wait()
+	close(done) // Signal the progress bar goroutine to stop
+
+	// Print final progress
+	fmt.Printf("\r[%s] Elapsed: %.2f sec / %.2f sec\n", strings.Repeat("=", 50), config.Duration.Seconds(), config.Duration.Seconds())
 }
 
 func checkError(message string, err error) {
