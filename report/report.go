@@ -84,6 +84,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,8 +107,17 @@ func GenerateReport1(metricsMap *sync.Map) {
 		p90 := time.Duration(epMetrics.ResponseTimesTDigest.Quantile(0.9)) * time.Millisecond
 		p95 := time.Duration(epMetrics.ResponseTimesTDigest.Quantile(0.95)) * time.Millisecond
 
-		fmt.Printf("  %s..................: avg=%v  min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n",
-			endpoint, avg, min, med, max, p90, p95)
+		// Calculate the number of dots needed
+		totalLength := 40 // Adjust this as needed for total length of endpoint + dots
+		numDots := totalLength - len(endpoint)
+		if numDots < 0 {
+			numDots = 0
+		}
+		dots := strings.Repeat(".", numDots)
+
+		// Print the formatted string
+		fmt.Printf("  %s%s: avg=%v  min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n",
+			endpoint, dots, avg, min, med, max, p90, p95)
 
 		return true
 	})

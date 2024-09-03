@@ -13,7 +13,7 @@ config.setDuration(options.duration);
 
 export default function () {
 
-    // group.start("All tested requests", function () {
+    group.start("reqres website", function () {
         const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
         const postUrl = "https://jsonplaceholder.typicode.com/posts";
         const putUrl = "https://jsonplaceholder.typicode.com/posts/1";
@@ -30,6 +30,6 @@ export default function () {
 
         // const deleteResponse = http.delete(deleteUrl);
         // deleteResponse.assertStatus(200)
-    // });
+    });
 }
 

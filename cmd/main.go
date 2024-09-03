@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"runtime"
 	"strings"
 	"sync"
@@ -32,6 +34,17 @@ var (
 func main() {
 	// Start the real-time monitoring dashboard
 	go startDashboard()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+
+	go func() {
+		<-signalChan
+		// Perform cleanup actions here before exiting
+		printMemoryUsage()
+		report.GenerateReport1(&metricsMap)
+		os.Exit(0)
+	}()
 
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
@@ -75,50 +88,23 @@ func bToMb(b uint64) uint64 {
 func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 	defer metricsWaitGroup.Done()
 
-	// Periodically print progress
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	for metric := range metricsChannel {
+		for key, endpointMetric := range metric.EndpointMetricsMap {
+			// Load or store the metric and mutex only once per key
+			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
+			existingMetric := value.(*metrics.EndpointMetrics)
 
-	// var totalTimeElapsed int64
-	// var tickCount int32
+			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
+			mutex := mutexValue.(*sync.Mutex)
 
-	// startTime := time.Now()
-
-	for {
-		select {
-		case metric, ok := <-metricsChannel:
-			if !ok {
-				// Channel is closed and drained
-				return
+			// Lock the mutex, update the metric, then unlock
+			mutex.Lock()
+			if loaded {
+				updateMetric(existingMetric, endpointMetric)
+			} else {
+				addNewMetric(&metricsMap, key, endpointMetric)
 			}
-			// Increment the counter for metrics received
-			for key, endpointMetric := range metric.EndpointMetricsMap {
-
-				value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
-				existingMetric := value.(*metrics.EndpointMetrics)
-				mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
-				mutex := mutexValue.(*sync.Mutex)
-				mutex.Lock()
-				if loaded {
-					updateMetric(existingMetric, endpointMetric)
-				} else {
-					addNewMetric(&metricsMap, key, endpointMetric)
-				}
-				mutex.Unlock()
-			}
-			// case <-ticker.C:
-			// 	// Print progress every second
-			// 	currentCount := atomic.LoadInt32(&metricsReceived)
-			// 	elapsed := time.Since(startTime).Seconds()
-			// 	atomic.AddInt64(&totalTimeElapsed, int64(elapsed))
-			// 	atomic.AddInt32(&tickCount, 1)
-			// 	averageDuration := float64(totalTimeElapsed) / float64(tickCount)
-			// 	// Move cursor to the line below
-			// 	fmt.Print("\033[998;0H") // Move to row 1, column 0 (line below the progress bar)
-			// 	fmt.Print("\033[K")      // Clear the line from the cursor to the end of the line
-			// 	fmt.Printf("Responses received: %d | Avg latency: %.2f sec", currentCount, averageDuration)
-
-			// 	startTime = time.Now() // Reset start time for next interval
+			mutex.Unlock()
 		}
 	}
 }
@@ -232,23 +218,6 @@ func displayConfig(config *moduleloader.Config) {
 	fmt.Printf("Concurrent Users: %d\nIterations: %d\nRamp-up Rate: %d\nDuration: %s\n", config.ConcurrentUsers, config.Iterations, config.RampUpRate, config.Duration)
 }
 
-// func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
-// 	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
-// 	checkError("Error initializing VM pool\n", err)
-
-// 	var waitGroup sync.WaitGroup
-
-// 	for i := 0; i < config.ConcurrentUsers; i++ {
-// 		waitGroup.Add(1)
-// 		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
-// 		if config.RampUpRate > 0 {
-// 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
-// 		}
-// 	}
-
-// 	waitGroup.Wait()
-// }
-
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {
 	vmPool, err := vmhandler.NewVMPool(config.ConcurrentUsers, config, metricsChannel)
 	checkError("Error initializing VM pool\n", err)
@@ -260,10 +229,12 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	go func() {
 		startTime := time.Now()
 		progressBarLength := 50 // Length of the progress bar
+		fmt.Printf("\033[?25l") // Hide cursor
 
 		for {
 			select {
 			case <-done:
+				fmt.Printf("\033[?25h") // Show cursor
 				return
 			default:
 				elapsed := time.Since(startTime)
@@ -272,12 +243,19 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 					progress = 1.0
 				}
 				filledLength := int(progress * float64(progressBarLength))
-				bar := fmt.Sprintf("[%s%s]", strings.Repeat("=", filledLength), strings.Repeat("-", progressBarLength-filledLength))
-				fmt.Print("\033[999;0H") // Move to row 999, column 0, which will be the last line
-				fmt.Print("\033[K")      // Clear the line from the cursor to the end of the line
-				fmt.Printf("%s Elapsed: %.2f sec / %.2f sec, Responses received %d", bar, elapsed.Seconds(), config.Duration.Seconds(), atomic.LoadInt32(&metricsReceived))
+				bar := fmt.Sprintf(
+					"\033[0G\033[32m[%s%s]\033[0m %.2f%% \033[33mElapsed:\033[0m %.2f sec / %.2f sec, \033[34mResponses received:\033[0m %d",
+					strings.Repeat("▓", filledLength),
+					strings.Repeat("░", progressBarLength-filledLength),
+					progress*100,
+					elapsed.Seconds(),
+					config.Duration.Seconds(),
+					atomic.LoadInt32(&metricsReceived),
+				)
 
-				time.Sleep(100 * time.Millisecond) // Update every 100ms
+				// Update the terminal display
+				fmt.Print(bar)
+				time.Sleep(50 * time.Millisecond) // Update every 50ms
 			}
 		}
 	}()
@@ -294,7 +272,12 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 	close(done) // Signal the progress bar goroutine to stop
 
 	// Print final progress
-	fmt.Printf("\r[%s] Elapsed: %.2f sec / %.2f sec\n", strings.Repeat("=", 50), config.Duration.Seconds(), config.Duration.Seconds())
+	progressBarLength := 50
+	fmt.Printf("\033[0G\033[32m[%s]\033[0m 100%% \033[33mElapsed:\033[0m %.2f sec / %.2f sec\n",
+		strings.Repeat("▓", progressBarLength),
+		config.Duration.Seconds(),
+		config.Duration.Seconds(),
+	)
 }
 
 func checkError(message string, err error) {
