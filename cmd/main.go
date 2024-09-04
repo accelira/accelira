@@ -42,7 +42,7 @@ func main() {
 		<-signalChan
 		// Perform cleanup actions here before exiting
 		printMemoryUsage()
-		report.GenerateReport1(&metricsMap)
+		report.GenerateReport(&metricsMap)
 		os.Exit(0)
 	}()
 
@@ -84,82 +84,70 @@ func printMemoryUsage() {
 func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
-
 func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 	defer metricsWaitGroup.Done()
 
 	for metric := range metricsChannel {
-		for key, endpointMetric := range metric.EndpointMetricsMap {
-			// Load or store the metric and mutex only once per key
-			if endpointMetric.Type != metrics.HTTPRequest {
-				continue
-			}
+		processMetrics(metric)
+	}
+}
 
-			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
-			existingMetric := value.(*metrics.EndpointMetrics)
-
-			mutexValue, _ := metricsMutexMap.LoadOrStore(key, &sync.Mutex{})
-			mutex := mutexValue.(*sync.Mutex)
-
-			// Lock the mutex, update the metric, then unlock
-			mutex.Lock()
-			if loaded {
-				updateMetric(existingMetric, endpointMetric)
-			} else {
-				addNewMetric(&metricsMap, key, endpointMetric)
-			}
-			mutex.Unlock()
+func processMetrics(metric metrics.Metrics) {
+	for key, endpointMetric := range metric.EndpointMetricsMap {
+		if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group {
+			processEndpointMetric(key, endpointMetric)
 		}
 	}
 }
 
-func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
-	// if endpointMetric.Errors > 0 {
-	// 	existingMetric.Errors += endpointMetric.Errors
-	// 	return
-	// }
+func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) {
+	value, isExisting := metricsMap.LoadOrStore(key, initializeNewMetric(endpointMetric))
+	storedMetric := value.(*metrics.EndpointMetrics)
 
+	if isExisting {
+		mergeMetrics(storedMetric, endpointMetric)
+	}
+}
+
+func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetrics {
+	return &metrics.EndpointMetrics{
+		ResponseTimesTDigest:       tdigest.New(),
+		TCPHandshakeLatencyTDigest: tdigest.New(),
+		DNSLookupLatencyTDigest:    tdigest.New(),
+		Requests:                   endpointMetric.Requests,
+		TotalDuration:              endpointMetric.TotalDuration,
+		TotalResponseTime:          endpointMetric.TotalResponseTime,
+		TotalBytesReceived:         endpointMetric.TotalBytesReceived,
+		TotalBytesSent:             endpointMetric.TotalBytesSent,
+		StatusCodeCounts:           make(map[int]int),
+		Type:                       endpointMetric.Type,
+	}
+}
+
+func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
 	atomic.AddInt32(&metricsReceived, 1)
 
-	existingMetric.Requests += endpointMetric.Requests
-	existingMetric.ResponseTimes = endpointMetric.ResponseTimes
-	existingMetric.TotalDuration += endpointMetric.TotalDuration
-	existingMetric.TotalResponseTime += endpointMetric.TotalResponseTime
-	existingMetric.TotalBytesReceived += endpointMetric.TotalBytesReceived
-	existingMetric.TotalBytesSent += endpointMetric.TotalBytesSent
+	storedMetric.Requests += newMetric.Requests
+	storedMetric.TotalDuration += newMetric.TotalDuration
+	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
+	storedMetric.TotalBytesReceived += newMetric.TotalBytesReceived
+	storedMetric.TotalBytesSent += newMetric.TotalBytesSent
 
-	if existingMetric.StatusCodeCounts == nil {
-		existingMetric.StatusCodeCounts = make(map[int]int)
+	for statusCode, count := range newMetric.StatusCodeCounts {
+		storedMetric.StatusCodeCounts[statusCode] += count
 	}
 
-	for statusCode, count := range endpointMetric.StatusCodeCounts {
-		existingMetric.StatusCodeCounts[statusCode] += count
-	}
-
-	addToTDigest(existingMetric, endpointMetric)
+	mergeTDigests(storedMetric, newMetric)
 }
 
-func addNewMetric(metricsMap *sync.Map, key string, endpointMetric *metrics.EndpointMetrics) {
-	initializeTDigest(endpointMetric)
-	metricsMap.Store(key, endpointMetric)
-}
-
-func addToTDigest(existingMetric, endpointMetric *metrics.EndpointMetrics) {
-	existingMetric.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
-	if endpointMetric.TCPHandshakeLatency.Milliseconds() > 0 {
-		existingMetric.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+func mergeTDigests(storedMetric, newMetric *metrics.EndpointMetrics) {
+	storedMetric.ResponseTimesTDigest.Add(float64(newMetric.ResponseTimes.Milliseconds()), 1)
+	if newMetric.TCPHandshakeLatency.Milliseconds() > 0 {
+		storedMetric.TCPHandshakeLatencyTDigest.Add(float64(newMetric.TCPHandshakeLatency.Milliseconds()), 1)
 	}
-	if endpointMetric.DNSLookupLatency.Milliseconds() > 0 {
-		existingMetric.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+	if newMetric.DNSLookupLatency.Milliseconds() > 0 {
+		storedMetric.DNSLookupLatencyTDigest.Add(float64(newMetric.DNSLookupLatency.Milliseconds()), 1)
 	}
-}
-
-func initializeTDigest(endpointMetric *metrics.EndpointMetrics) {
-	endpointMetric.ResponseTimesTDigest = tdigest.New()
-	endpointMetric.TCPHandshakeLatencyTDigest = tdigest.New()
-	endpointMetric.DNSLookupLatencyTDigest = tdigest.New()
-
-	addToTDigest(endpointMetric, endpointMetric)
 }
 
 func buildJavaScriptCode(scriptPath string) (string, error) {
@@ -215,7 +203,7 @@ func executeScript(cmd *cobra.Command, args []string) {
 	close(metricsChannel)
 	metricsWaitGroup.Wait()
 
-	report.GenerateReport1(&metricsMap)
+	report.GenerateReport(&metricsMap)
 }
 
 func displayConfig(config *moduleloader.Config) {
