@@ -15,19 +15,17 @@ import (
 
 	"github.com/accelira/accelira/dashboard"
 	"github.com/accelira/accelira/metrics"
+	"github.com/accelira/accelira/metricsprocessor"
 	"github.com/accelira/accelira/moduleloader"
 	"github.com/accelira/accelira/report"
 	"github.com/accelira/accelira/util"
 	"github.com/accelira/accelira/vmhandler"
 	"github.com/evanw/esbuild/pkg/api"
-	"github.com/influxdata/tdigest"
 	"github.com/spf13/cobra"
 )
 
 var (
-	metricsMap       sync.Map
 	metricsReceived  int32
-	metricsMutexMap  sync.Map
 	metricsWaitGroup sync.WaitGroup
 )
 
@@ -42,7 +40,7 @@ func main() {
 		<-signalChan
 		// Perform cleanup actions here before exiting
 		printMemoryUsage()
-		report.GenerateReport(&metricsMap)
+		report.GenerateReport(&metricsprocessor.MetricsMap)
 		os.Exit(0)
 	}()
 
@@ -84,71 +82,6 @@ func printMemoryUsage() {
 func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
-func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
-	defer metricsWaitGroup.Done()
-
-	for metric := range metricsChannel {
-		processMetrics(metric)
-	}
-}
-
-func processMetrics(metric metrics.Metrics) {
-	for key, endpointMetric := range metric.EndpointMetricsMap {
-		if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group {
-			processEndpointMetric(key, endpointMetric)
-		}
-	}
-}
-
-func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) {
-	value, isExisting := metricsMap.LoadOrStore(key, initializeNewMetric(endpointMetric))
-	storedMetric := value.(*metrics.EndpointMetrics)
-
-	if isExisting {
-		mergeMetrics(storedMetric, endpointMetric)
-	}
-}
-
-func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetrics {
-	return &metrics.EndpointMetrics{
-		ResponseTimesTDigest:       tdigest.New(),
-		TCPHandshakeLatencyTDigest: tdigest.New(),
-		DNSLookupLatencyTDigest:    tdigest.New(),
-		Requests:                   endpointMetric.Requests,
-		TotalDuration:              endpointMetric.TotalDuration,
-		TotalResponseTime:          endpointMetric.TotalResponseTime,
-		TotalBytesReceived:         endpointMetric.TotalBytesReceived,
-		TotalBytesSent:             endpointMetric.TotalBytesSent,
-		StatusCodeCounts:           make(map[int]int),
-		Type:                       endpointMetric.Type,
-	}
-}
-
-func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
-	atomic.AddInt32(&metricsReceived, 1)
-
-	storedMetric.Requests += newMetric.Requests
-	storedMetric.TotalDuration += newMetric.TotalDuration
-	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
-	storedMetric.TotalBytesReceived += newMetric.TotalBytesReceived
-	storedMetric.TotalBytesSent += newMetric.TotalBytesSent
-
-	for statusCode, count := range newMetric.StatusCodeCounts {
-		storedMetric.StatusCodeCounts[statusCode] += count
-	}
-
-	mergeTDigests(storedMetric, newMetric)
-}
-
-func mergeTDigests(storedMetric, newMetric *metrics.EndpointMetrics) {
-	storedMetric.ResponseTimesTDigest.Add(float64(newMetric.ResponseTimes.Milliseconds()), 1)
-	if newMetric.TCPHandshakeLatency.Milliseconds() > 0 {
-		storedMetric.TCPHandshakeLatencyTDigest.Add(float64(newMetric.TCPHandshakeLatency.Milliseconds()), 1)
-	}
-	if newMetric.DNSLookupLatency.Milliseconds() > 0 {
-		storedMetric.DNSLookupLatencyTDigest.Add(float64(newMetric.DNSLookupLatency.Milliseconds()), 1)
-	}
-}
 
 func buildJavaScriptCode(scriptPath string) (string, error) {
 	result := api.Build(api.BuildOptions{
@@ -180,7 +113,7 @@ func setupVM(code string) (*moduleloader.Config, error) {
 
 func startMetricsCollection(metricsChannel chan metrics.Metrics) {
 	metricsWaitGroup.Add(1)
-	go gatherMetrics(metricsChannel)
+	go metricsprocessor.GatherMetrics(metricsChannel, &metricsWaitGroup)
 }
 
 func executeScript(cmd *cobra.Command, args []string) {
@@ -203,7 +136,7 @@ func executeScript(cmd *cobra.Command, args []string) {
 	close(metricsChannel)
 	metricsWaitGroup.Wait()
 
-	report.GenerateReport(&metricsMap)
+	report.GenerateReport(&metricsprocessor.MetricsMap)
 }
 
 func displayConfig(config *moduleloader.Config) {
@@ -290,7 +223,7 @@ func startDashboard() {
 	// Serve metrics at a different endpoint
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics1 := make(map[string]map[string]interface{})
-		metricsMap.Range(func(key, value interface{}) bool {
+		metricsprocessor.MetricsMap.Range(func(key, value interface{}) bool {
 			endpointMetrics := value.(*metrics.EndpointMetrics)
 			metrics1[key.(string)] = map[string]interface{}{
 				// "50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
