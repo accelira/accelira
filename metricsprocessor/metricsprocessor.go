@@ -45,7 +45,6 @@ func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.Endpo
 		TCPHandshakeLatencyTDigest: tdigest.New(),
 		DNSLookupLatencyTDigest:    tdigest.New(),
 		Requests:                   endpointMetric.Requests,
-		TotalDuration:              endpointMetric.TotalDuration,
 		TotalResponseTime:          endpointMetric.TotalResponseTime,
 		TotalBytesReceived:         endpointMetric.TotalBytesReceived,
 		TotalBytesSent:             endpointMetric.TotalBytesSent,
@@ -58,7 +57,6 @@ func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
 	atomic.AddInt32(&metricsReceived, 1)
 
 	storedMetric.Requests += newMetric.Requests
-	storedMetric.TotalDuration += newMetric.TotalDuration
 	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
 	storedMetric.TotalBytesReceived += newMetric.TotalBytesReceived
 	storedMetric.TotalBytesSent += newMetric.TotalBytesSent

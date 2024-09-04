@@ -50,7 +50,7 @@ func SetupRequire(vm *goja.Runtime, config *Config, metricsChan chan<- metrics.M
 		case "Accelira/group":
 			return createGroupModule(metricsChan)
 		case "Accelira/assert":
-			return createAssertModule(vm) // Pass vm here
+			return createAssertModule(metricsChan, vm) // Pass vm here
 		case "fs":
 			return createFSModule()
 		case "crypto":
@@ -134,7 +134,7 @@ func createGroupModule(metricsChan chan<- metrics.Metrics) map[string]interface{
 }
 
 // createAssertModule provides basic assertion functionalities.
-func createAssertModule(vm *goja.Runtime) map[string]interface{} {
+func createAssertModule(metricsChan chan<- metrics.Metrics, vm *goja.Runtime) map[string]interface{} {
 	return map[string]interface{}{
 		"check": func(response map[string]interface{}, assertions map[string]interface{}) {
 			for name, assertFunc := range assertions {
@@ -148,7 +148,11 @@ func createAssertModule(vm *goja.Runtime) map[string]interface{} {
 					}
 					result := fn(funcCall)
 					if !result.ToBoolean() {
-						panic(fmt.Sprintf("Assertion '%s' failed", name))
+						// panic(fmt.Sprintf("Assertion '%s' failed", name))
+						metricsData := metrics.CollectErrorMetrics(name)
+						if metricsChan != nil {
+							metrics.SendMetrics(metricsData, metricsChan)
+						}
 					}
 				} else {
 					panic(fmt.Sprintf("Invalid assertion function for '%s'", name))

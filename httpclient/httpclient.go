@@ -183,7 +183,6 @@ func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, s
 		// TLSHandshakeLatency: tlsHandshakeLatency,
 		DNSLookupLatency:   dnsLookupLatency,
 		Requests:           1,
-		TotalDuration:      duration,
 		TotalResponseTime:  duration,
 		TotalBytesReceived: bytesReceived,
 		TotalBytesSent:     bytesSent,

@@ -46,7 +46,7 @@ func aggregateMetrics(metricsMap *sync.Map) (totalRequests, totalErrors int, tot
 		if epMetrics.Type == metrics.HTTPRequest {
 			totalRequests += epMetrics.Requests
 			totalErrors += epMetrics.Errors
-			totalDuration += epMetrics.TotalDuration
+			totalDuration += epMetrics.TotalResponseTime
 		}
 		return true
 	})
