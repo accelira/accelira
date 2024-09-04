@@ -174,6 +174,7 @@ func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, s
 	key := fmt.Sprintf("%s %s", method, url)
 
 	epMetrics := &metrics.EndpointMetrics{
+		Type:                metrics.HTTPRequest,
 		URL:                 url,
 		Method:              method,
 		StatusCodeCounts:    map[int]int{statusCode: 1},

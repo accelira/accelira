@@ -16,7 +16,7 @@ func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error)
 	moduleloader.SetupConsoleModule(vm)
 	_ = moduleloader.InitializeModuleExport(vm)
 
-	vm.Set("require", moduleloader.SetupRequire(config, nil)) // Pass the correct arguments
+	vm.Set("require", moduleloader.SetupRequire(vm, config, nil)) // Pass the correct arguments
 
 	_, err := vm.RunScript("config.js", string(content))
 	if err != nil {
@@ -61,7 +61,7 @@ func NewVMPool(size int, config *moduleloader.Config, metricsChan chan<- metrics
 		vm := goja.New()
 		moduleloader.SetupConsoleModule(vm)
 		moduleloader.InitializeModuleExport(vm)
-		vm.Set("require", moduleloader.SetupRequire(config, metricsChan))
+		vm.Set("require", moduleloader.SetupRequire(vm, config, metricsChan))
 		pool <- vm
 	}
 	return &VMPool{pool: pool}, nil

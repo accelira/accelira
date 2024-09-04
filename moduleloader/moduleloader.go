@@ -40,7 +40,7 @@ func createConfigModule(config *Config) map[string]interface{} {
 	}
 }
 
-func SetupRequire(config *Config, metricsChan chan<- metrics.Metrics) func(moduleName string) interface{} {
+func SetupRequire(vm *goja.Runtime, config *Config, metricsChan chan<- metrics.Metrics) func(moduleName string) interface{} {
 	return func(moduleName string) interface{} {
 		switch moduleName {
 		case "Accelira/http":
@@ -50,7 +50,7 @@ func SetupRequire(config *Config, metricsChan chan<- metrics.Metrics) func(modul
 		case "Accelira/group":
 			return createGroupModule(metricsChan)
 		case "Accelira/assert":
-			return createAssertModule()
+			return createAssertModule(vm) // Pass vm here
 		case "fs":
 			return createFSModule()
 		case "crypto":
@@ -104,6 +104,7 @@ func createResponseObject(resp httpclient.HttpResponse, err error, metricsChan c
 							Method:           resp.Method,
 							StatusCodeCounts: map[int]int{resp.StatusCode: 1},
 							Errors:           1,
+							Type:             metrics.Error,
 						},
 					},
 				}
@@ -133,16 +134,25 @@ func createGroupModule(metricsChan chan<- metrics.Metrics) map[string]interface{
 }
 
 // createAssertModule provides basic assertion functionalities.
-func createAssertModule() map[string]interface{} {
+func createAssertModule(vm *goja.Runtime) map[string]interface{} {
 	return map[string]interface{}{
-		"equal": func(expected, actual interface{}) {
-			if expected != actual {
-				panic(fmt.Sprintf("Assertion failed: expected %v, got %v", expected, actual))
-			}
-		},
-		"notEqual": func(expected, actual interface{}) {
-			if expected == actual {
-				panic(fmt.Sprintf("Assertion failed: expected something different from %v, got %v", expected, actual))
+		"check": func(response map[string]interface{}, assertions map[string]interface{}) {
+			for name, assertFunc := range assertions {
+				// Check if the assertFunc is callable (goja.Callable)
+				if fn, ok := assertFunc.(func(goja.FunctionCall) goja.Value); ok {
+					responseValue := vm.ToValue(response["response"])
+
+					funcCall := goja.FunctionCall{
+						This:      goja.Undefined(),
+						Arguments: []goja.Value{responseValue},
+					}
+					result := fn(funcCall)
+					if !result.ToBoolean() {
+						panic(fmt.Sprintf("Assertion '%s' failed", name))
+					}
+				} else {
+					panic(fmt.Sprintf("Invalid assertion function for '%s'", name))
+				}
 			}
 		},
 	}

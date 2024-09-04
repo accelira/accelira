@@ -27,6 +27,7 @@ func CollectGroupMetrics(name string, duration time.Duration) Metrics {
 		Method:           "GROUP",
 		StatusCodeCounts: make(map[int]int),
 		ResponseTimes:    0,
+		Type:             Group,
 	}
 
 	epMetrics.Requests++
@@ -41,7 +42,16 @@ type Metrics struct {
 	EndpointMetricsMap map[string]*EndpointMetrics
 }
 
+type MetricType string
+
+const (
+	HTTPRequest MetricType = "HTTP_REQUEST"
+	Error       MetricType = "ERROR"
+	Group       MetricType = "GROUP"
+)
+
 type EndpointMetrics struct {
+	Type                       MetricType
 	URL                        string
 	Method                     string
 	StatusCodeCounts           map[int]int

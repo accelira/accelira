@@ -1,9 +1,9 @@
 // config.js
 
 export const options = {
-    iterations: 2,
+    iterations: 1,
     concurrentUsers: 1,
     rampUpRate: 1000,
-    duration: "10s"
+    duration: "1s"
     // Add more configuration options as needed
   };

@@ -6,9 +6,9 @@ export default function () {
     let response = http.get('https://reqres.in/api/users');
 
     // Check the response status
-    // check(response, {
-    //     'is status 200': (r) => r.status === 200,
-    // });
+    check(response, {
+        'is status 200': (r) => r.status === 200,
+    });
 
     // Optional: Wait for a short period to simulate user think time
 }

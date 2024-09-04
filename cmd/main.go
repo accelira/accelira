@@ -33,7 +33,7 @@ var (
 
 func main() {
 	// Start the real-time monitoring dashboard
-	go startDashboard()
+	// go startDashboard()
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
@@ -91,6 +91,10 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 	for metric := range metricsChannel {
 		for key, endpointMetric := range metric.EndpointMetricsMap {
 			// Load or store the metric and mutex only once per key
+			if endpointMetric.Type != metrics.HTTPRequest {
+				continue
+			}
+
 			value, loaded := metricsMap.LoadOrStore(key, &metrics.EndpointMetrics{})
 			existingMetric := value.(*metrics.EndpointMetrics)
 
@@ -110,10 +114,10 @@ func gatherMetrics(metricsChannel <-chan metrics.Metrics) {
 }
 
 func updateMetric(existingMetric, endpointMetric *metrics.EndpointMetrics) {
-	if endpointMetric.Errors > 0 {
-		existingMetric.Errors += endpointMetric.Errors
-		return
-	}
+	// if endpointMetric.Errors > 0 {
+	// 	existingMetric.Errors += endpointMetric.Errors
+	// 	return
+	// }
 
 	atomic.AddInt32(&metricsReceived, 1)
 
@@ -255,7 +259,7 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 
 				// Update the terminal display
 				fmt.Print(bar)
-				time.Sleep(50 * time.Millisecond) // Update every 50ms
+				time.Sleep(100 * time.Millisecond) // Update every 50ms
 			}
 		}
 	}()
