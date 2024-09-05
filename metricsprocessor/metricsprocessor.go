@@ -23,9 +23,9 @@ func GatherMetrics(metricsChannel <-chan metrics.Metrics, metricsWaitGroup *sync
 
 func processMetrics(metric metrics.Metrics) {
 	for key, endpointMetric := range metric.EndpointMetricsMap {
-		if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group || endpointMetric.Type == metrics.Error {
-			processEndpointMetric(key, endpointMetric)
-		}
+		// if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group || endpointMetric.Type == metrics.Error {
+		processEndpointMetric(key, endpointMetric)
+		// }
 	}
 }
 
