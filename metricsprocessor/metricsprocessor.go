@@ -9,8 +9,7 @@ import (
 )
 
 var (
-	MetricsMap sync.Map
-
+	MetricsMap      sync.Map
 	metricsReceived int32
 )
 
@@ -24,7 +23,7 @@ func GatherMetrics(metricsChannel <-chan metrics.Metrics, metricsWaitGroup *sync
 
 func processMetrics(metric metrics.Metrics) {
 	for key, endpointMetric := range metric.EndpointMetricsMap {
-		if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group {
+		if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group || endpointMetric.Type == metrics.Error {
 			processEndpointMetric(key, endpointMetric)
 		}
 	}
@@ -40,7 +39,7 @@ func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) 
 }
 
 func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetrics {
-	return &metrics.EndpointMetrics{
+	returnMetrics := &metrics.EndpointMetrics{
 		ResponseTimesTDigest:       tdigest.New(),
 		TCPHandshakeLatencyTDigest: tdigest.New(),
 		DNSLookupLatencyTDigest:    tdigest.New(),
@@ -51,6 +50,17 @@ func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.Endpo
 		StatusCodeCounts:           make(map[int]int),
 		Type:                       endpointMetric.Type,
 	}
+
+	returnMetrics.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+	returnMetrics.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
+	returnMetrics.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+	if endpointMetric.CheckResult {
+		returnMetrics.TotalCheckPassed += 1
+	} else {
+		returnMetrics.TotalCheckFailed += 1
+	}
+
+	return returnMetrics
 }
 
 func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
@@ -60,6 +70,11 @@ func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
 	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
 	storedMetric.TotalBytesReceived += newMetric.TotalBytesReceived
 	storedMetric.TotalBytesSent += newMetric.TotalBytesSent
+	if newMetric.CheckResult {
+		storedMetric.TotalCheckPassed += 1
+	} else {
+		storedMetric.TotalCheckFailed += 1
+	}
 
 	for statusCode, count := range newMetric.StatusCodeCounts {
 		storedMetric.StatusCodeCounts[statusCode] += count

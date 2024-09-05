@@ -7,7 +7,7 @@ export default function () {
 
     // Check the response status
     check(response, {
-        'is status 200': (r) => r.status === 200,
+        'is status 200': (r) => r.status === 201,
     });
 
     // Optional: Wait for a short period to simulate user think time

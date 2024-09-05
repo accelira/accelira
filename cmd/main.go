@@ -40,7 +40,10 @@ func main() {
 		<-signalChan
 		// Perform cleanup actions here before exiting
 		printMemoryUsage()
-		report.GenerateReport(&metricsprocessor.MetricsMap)
+		reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
+
+		// Generate the report
+		reportGenerator.GenerateReport()
 		os.Exit(0)
 	}()
 
@@ -127,7 +130,7 @@ func executeScript(cmd *cobra.Command, args []string) {
 
 	displayConfig(vmConfig)
 
-	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*5)
+	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*100)
 
 	startMetricsCollection(metricsChannel)
 
@@ -136,7 +139,11 @@ func executeScript(cmd *cobra.Command, args []string) {
 	close(metricsChannel)
 	metricsWaitGroup.Wait()
 
-	report.GenerateReport(&metricsprocessor.MetricsMap)
+	// report.GenerateReport(&metricsprocessor.MetricsMap)
+	reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
+
+	// Generate the report
+	reportGenerator.GenerateReport()
 }
 
 func displayConfig(config *moduleloader.Config) {

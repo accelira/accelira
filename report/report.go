@@ -11,37 +11,84 @@ import (
 	"github.com/fatih/color"
 )
 
+// ReportGenerator handles the generation of performance reports.
+type ReportGenerator struct {
+	metricsMap *sync.Map
+}
+
+// NewReportGenerator creates a new ReportGenerator instance.
+func NewReportGenerator(metricsMap *sync.Map) *ReportGenerator {
+	return &ReportGenerator{metricsMap: metricsMap}
+}
+
 // GenerateReport generates a detailed report for the performance test.
-func GenerateReport(metricsMap *sync.Map) {
-	printSummary(metricsMap)
-	color.New(color.FgGreen).Add(color.Bold).Println("\nDetailed Report:")
+func (rg *ReportGenerator) GenerateReport() {
+	rg.printSummary()
+	rg.printChecks()
+	rg.printDetailedReport()
+}
 
-	metricsMap.Range(func(key, value interface{}) bool {
-		endpoint := key.(string)
+// printSummary prints the summary of the performance test.
+func (rg *ReportGenerator) printSummary() {
+	color.New(color.FgCyan, color.Bold).Println("\nPerformance Test Report")
+	color.New(color.FgWhite).Println("\nSummary:")
+
+	totalRequests, totalErrors, totalDuration := rg.aggregateMetrics()
+
+	fmt.Printf("  Total Requests:   %d\n", totalRequests)
+	fmt.Printf("  Total Errors:     %d\n", totalErrors)
+	fmt.Printf("  Total Duration:   %v\n", totalDuration)
+	rg.printAverageDuration(totalRequests, totalDuration)
+}
+
+// printChecks prints the status of various checks.
+func (rg *ReportGenerator) printChecks() {
+	color.New(color.FgMagenta).Println("\nChecks Status:")
+
+	rg.metricsMap.Range(func(key, value interface{}) bool {
 		epMetrics := value.(*metrics.EndpointMetrics)
-
-		printEndpointMetrics(endpoint, epMetrics)
+		if epMetrics.Type == metrics.Error {
+			rg.printCheckStatus(key.(string), epMetrics)
+		}
 		return true
 	})
 }
 
-// printSummary prints the summary of the performance test.
-func printSummary(metricsMap *sync.Map) {
-	color.New(color.FgCyan).Add(color.Bold).Println("\n=== Performance Test Report ===")
-	color.New(color.FgGreen).Add(color.Bold).Println("\nSummary:")
+// printCheckStatus prints the status of an individual check.
+func (rg *ReportGenerator) printCheckStatus(key string, epMetrics *metrics.EndpointMetrics) {
+	checkStatus, statusColor := rg.getCheckStatus(epMetrics)
 
-	totalRequests, totalErrors, totalDuration := aggregateMetrics(metricsMap)
+	statusLine := fmt.Sprintf("  %s %s", checkStatus, key)
+	color.New(statusColor).Println(statusLine)
 
-	fmt.Printf("  Total Requests       : %d\n", totalRequests)
-	fmt.Printf("  Total Errors         : %d\n", totalErrors)
-	fmt.Printf("  Total Duration       : %v\n", totalDuration)
-	printAverageDuration(totalRequests, totalDuration)
-	fmt.Println()
+	totalChecks := epMetrics.TotalCheckPassed + epMetrics.TotalCheckFailed
+	passRate := rg.calculateRate(epMetrics.TotalCheckPassed, totalChecks)
+	failRate := rg.calculateRate(epMetrics.TotalCheckFailed, totalChecks)
+
+	fmt.Printf("    Pass Rate: %.2f%% (%d / %d) | Fail Rate: %.2f%% (%d / %d)\n",
+		passRate, epMetrics.TotalCheckPassed, totalChecks,
+		failRate, epMetrics.TotalCheckFailed, totalChecks)
+}
+
+// getCheckStatus determines the status and color of the check.
+func (rg *ReportGenerator) getCheckStatus(epMetrics *metrics.EndpointMetrics) (string, color.Attribute) {
+	if epMetrics.TotalCheckFailed > 0 {
+		return "✗ Failed", color.FgRed
+	}
+	return "✓ Passed", color.FgGreen
+}
+
+// calculateRate calculates the percentage rate given a count and total.
+func (rg *ReportGenerator) calculateRate(count, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(count) / float64(total) * 100
 }
 
 // aggregateMetrics aggregates the total requests, errors, and duration from all endpoints.
-func aggregateMetrics(metricsMap *sync.Map) (totalRequests, totalErrors int, totalDuration time.Duration) {
-	metricsMap.Range(func(key, value interface{}) bool {
+func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, totalDuration time.Duration) {
+	rg.metricsMap.Range(func(key, value interface{}) bool {
 		epMetrics := value.(*metrics.EndpointMetrics)
 		if epMetrics.Type == metrics.HTTPRequest {
 			totalRequests += epMetrics.Requests
@@ -54,37 +101,51 @@ func aggregateMetrics(metricsMap *sync.Map) (totalRequests, totalErrors int, tot
 }
 
 // printAverageDuration prints the average duration of the requests if available.
-func printAverageDuration(totalRequests int, totalDuration time.Duration) {
+func (rg *ReportGenerator) printAverageDuration(totalRequests int, totalDuration time.Duration) {
 	if totalRequests > 0 {
 		avgDuration := totalDuration / time.Duration(totalRequests)
-		fmt.Printf("  Average Duration     : %v\n", avgDuration)
+		fmt.Printf("  Average Duration: %v\n", avgDuration)
 	} else {
-		fmt.Println("  Average Duration     : N/A")
+		fmt.Println("  Average Duration: N/A")
 	}
 }
 
+// printDetailedReport prints detailed metrics for each endpoint.
+func (rg *ReportGenerator) printDetailedReport() {
+	color.New(color.FgWhite, color.Bold).Println("\nEndpoint Metrics:")
+
+	rg.metricsMap.Range(func(key, value interface{}) bool {
+		endpoint := key.(string)
+		epMetrics := value.(*metrics.EndpointMetrics)
+		if epMetrics.Type == metrics.HTTPRequest || epMetrics.Type == metrics.Group {
+			rg.printEndpointMetrics(endpoint, epMetrics)
+		}
+		return true
+	})
+}
+
 // printEndpointMetrics prints the metrics for a specific endpoint.
-func printEndpointMetrics(endpoint string, epMetrics *metrics.EndpointMetrics) {
-	avg := roundDurationToTwoDecimals(epMetrics.TotalResponseTime / time.Duration(epMetrics.Requests))
-	min := quantileDuration(epMetrics, 0.0)
-	med := quantileDuration(epMetrics, 0.5)
-	max := quantileDuration(epMetrics, 1.0)
-	p90 := quantileDuration(epMetrics, 0.9)
-	p95 := quantileDuration(epMetrics, 0.95)
+func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metrics.EndpointMetrics) {
+	avg := rg.roundDurationToTwoDecimals(epMetrics.TotalResponseTime / time.Duration(epMetrics.Requests))
+	min := rg.quantileDuration(epMetrics, 0.0)
+	med := rg.quantileDuration(epMetrics, 0.5)
+	max := rg.quantileDuration(epMetrics, 1.0)
+	p90 := rg.quantileDuration(epMetrics, 0.9)
+	p95 := rg.quantileDuration(epMetrics, 0.95)
 
-	dots := generateDots(endpoint, 40) // Adjust total length as needed
+	dots := rg.generateDots(endpoint, 35) // Adjust total length as needed
 
-	fmt.Printf("  %s%s: avg=%v  min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n",
+	fmt.Printf("  %s%s avg=%v min=%v med=%v max=%v p(90)=%v p(95)=%v\n",
 		endpoint, dots, avg, min, med, max, p90, p95)
 }
 
 // quantileDuration calculates the duration for a specific quantile from the TDigest.
-func quantileDuration(epMetrics *metrics.EndpointMetrics, quantile float64) time.Duration {
+func (rg *ReportGenerator) quantileDuration(epMetrics *metrics.EndpointMetrics, quantile float64) time.Duration {
 	return time.Duration(epMetrics.ResponseTimesTDigest.Quantile(quantile)) * time.Millisecond
 }
 
 // generateDots generates the dots for alignment in the report.
-func generateDots(endpoint string, totalLength int) string {
+func (rg *ReportGenerator) generateDots(endpoint string, totalLength int) string {
 	numDots := totalLength - len(endpoint)
 	if numDots < 0 {
 		numDots = 0
@@ -93,7 +154,7 @@ func generateDots(endpoint string, totalLength int) string {
 }
 
 // roundDurationToTwoDecimals rounds the duration to two decimal places.
-func roundDurationToTwoDecimals(d time.Duration) time.Duration {
+func (rg *ReportGenerator) roundDurationToTwoDecimals(d time.Duration) time.Duration {
 	seconds := d.Seconds()
 	roundedSeconds := math.Round(seconds*100) / 100
 	return time.Duration(roundedSeconds * float64(time.Second))

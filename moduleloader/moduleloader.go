@@ -147,13 +147,13 @@ func createAssertModule(metricsChan chan<- metrics.Metrics, vm *goja.Runtime) ma
 						Arguments: []goja.Value{responseValue},
 					}
 					result := fn(funcCall)
-					if !result.ToBoolean() {
-						// panic(fmt.Sprintf("Assertion '%s' failed", name))
-						metricsData := metrics.CollectErrorMetrics(name)
-						if metricsChan != nil {
-							metrics.SendMetrics(metricsData, metricsChan)
-						}
+					// if !result.ToBoolean() {
+					// panic(fmt.Sprintf("Assertion '%s' failed", name))
+					metricsData := metrics.CollectErrorMetrics(name, result.ToBoolean())
+					if metricsChan != nil {
+						metrics.SendMetrics(metricsData, metricsChan)
 					}
+					// }
 				} else {
 					panic(fmt.Sprintf("Invalid assertion function for '%s'", name))
 				}

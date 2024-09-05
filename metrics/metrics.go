@@ -37,12 +37,13 @@ func CollectGroupMetrics(name string, duration time.Duration) Metrics {
 	return Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{key: epMetrics}}
 }
 
-func CollectErrorMetrics(name string) Metrics {
-	key := fmt.Sprintf("group: %s", name)
+func CollectErrorMetrics(name string, result bool) Metrics {
+	key := fmt.Sprintf("%s", name)
 	epMetrics := &EndpointMetrics{
-		URL:    name,
-		Method: "ERROR",
-		Type:   Error,
+		URL:         name,
+		Method:      "ERROR",
+		Type:        Error,
+		CheckResult: result,
 	}
 
 	return Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{key: epMetrics}}
@@ -76,4 +77,7 @@ type EndpointMetrics struct {
 	TCPHandshakeLatencyTDigest *tdigest.TDigest
 	DNSLookupLatency           time.Duration
 	DNSLookupLatencyTDigest    *tdigest.TDigest
+	CheckResult                bool
+	TotalCheckPassed           int
+	TotalCheckFailed           int
 }

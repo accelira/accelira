@@ -47,7 +47,7 @@ func NewHTTPClient() *HTTPClient {
 		MaxIdleConnsPerHost: 100,
 		TLSHandshakeTimeout: 10 * time.Second, // Timeout for TLS handshake
 		ForceAttemptHTTP2:   true,             // Enable HTTP/2
-
+		// TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 	}
 
 	client := &http.Client{
