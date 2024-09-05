@@ -31,15 +31,29 @@ func ExecuteExportedFunction(vm *goja.Runtime, module *goja.Object) {
 
 	if fn, ok := goja.AssertFunction(moduleExports); ok {
 		// CommonJS style: module.exports = function() { ... }
-		ExecuteFunction(vm, fn)
+		if err := executeFunctionWithErrorHandling(vm, fn); err != nil {
+			fmt.Printf("Error executing CommonJS export function: %v\n", err)
+		}
 	} else if defaultExport := moduleExports.ToObject(vm).Get("default"); defaultExport != nil {
 		if fn, ok := goja.AssertFunction(defaultExport); ok {
 			// ES6 style: export default function() { ... }
-			ExecuteFunction(vm, fn)
+			if err := executeFunctionWithErrorHandling(vm, fn); err != nil {
+				fmt.Printf("Error executing ES6 export function: %v\n", err)
+			}
+		} else {
+			fmt.Println("Default export is not a function.")
 		}
 	} else {
 		fmt.Println("No executable export found.")
 	}
+}
+
+func executeFunctionWithErrorHandling(vm *goja.Runtime, fn goja.Callable) error {
+	_, err := fn(goja.Undefined(), vm.ToValue(nil))
+	if err != nil {
+		return fmt.Errorf("execution error: %w", err)
+	}
+	return nil
 }
 
 func ExecuteFunction(vm *goja.Runtime, fn goja.Callable) {

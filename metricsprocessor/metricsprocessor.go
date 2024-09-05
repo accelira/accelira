@@ -9,7 +9,8 @@ import (
 )
 
 var (
-	MetricsMap      sync.Map
+	MetricsMap      = make(map[string]*metrics.EndpointMetrics)
+	MetricsMapMutex sync.RWMutex
 	metricsReceived int32
 )
 
@@ -23,19 +24,26 @@ func GatherMetrics(metricsChannel <-chan metrics.Metrics, metricsWaitGroup *sync
 
 func processMetrics(metric metrics.Metrics) {
 	for key, endpointMetric := range metric.EndpointMetricsMap {
-		// if endpointMetric.Type == metrics.HTTPRequest || endpointMetric.Type == metrics.Group || endpointMetric.Type == metrics.Error {
 		processEndpointMetric(key, endpointMetric)
-		// }
 	}
 }
 
 func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) {
-	value, isExisting := MetricsMap.LoadOrStore(key, initializeNewMetric(endpointMetric))
-	storedMetric := value.(*metrics.EndpointMetrics)
+	// MetricsMapMutex.RLock()
+	storedMetric, isExisting := MetricsMap[key]
+	// MetricsMapMutex.RUnlock()
 
-	if isExisting {
-		mergeMetrics(storedMetric, endpointMetric)
+	// fmt.Printf("storedMetric %v \n", storedMetric)
+
+	if !isExisting {
+		newMetric := initializeNewMetric(endpointMetric)
+		// MetricsMapMutex.Lock()
+		MetricsMap[key] = newMetric
+		// MetricsMapMutex.Unlock()
+		return
 	}
+
+	mergeMetrics(storedMetric, endpointMetric)
 }
 
 func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetrics {

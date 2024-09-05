@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/accelira/accelira/dashboard"
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/metricsprocessor"
 	"github.com/accelira/accelira/moduleloader"
@@ -40,10 +38,10 @@ func main() {
 		<-signalChan
 		// Perform cleanup actions here before exiting
 		printMemoryUsage()
-		reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
+		// reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
 
-		// Generate the report
-		reportGenerator.GenerateReport()
+		// // Generate the report
+		// reportGenerator.GenerateReport()
 		os.Exit(0)
 	}()
 
@@ -218,31 +216,31 @@ func checkError(message string, err error) {
 	}
 }
 
-const htmlContent = dashboard.HtmlContent
+// const htmlContent = dashboard.HtmlContent
 
-func startDashboard() {
-	// Handle requests to the root path with the HTML content
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(htmlContent))
-	})
+// func startDashboard() {
+// 	// Handle requests to the root path with the HTML content
+// 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+// 		w.Header().Set("Content-Type", "text/html")
+// 		w.Write([]byte(htmlContent))
+// 	})
 
-	// Serve metrics at a different endpoint
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		metrics1 := make(map[string]map[string]interface{})
-		metricsprocessor.MetricsMap.Range(func(key, value interface{}) bool {
-			endpointMetrics := value.(*metrics.EndpointMetrics)
-			metrics1[key.(string)] = map[string]interface{}{
-				// "50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
-				// "90thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.9),
-				"realtimeResponse": endpointMetrics.ResponseTimes.Milliseconds(),
-			}
-			return true
-		})
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(metrics1)
-	})
+// 	// Serve metrics at a different endpoint
+// 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+// 		metrics1 := make(map[string]map[string]interface{})
+// 		metricsprocessor.MetricsMap.Range(func(key, value interface{}) bool {
+// 			endpointMetrics := value.(*metrics.EndpointMetrics)
+// 			metrics1[key.(string)] = map[string]interface{}{
+// 				// "50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
+// 				// "90thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.9),
+// 				"realtimeResponse": endpointMetrics.ResponseTimes.Milliseconds(),
+// 			}
+// 			return true
+// 		})
+// 		w.Header().Set("Content-Type", "application/json")
+// 		json.NewEncoder(w).Encode(metrics1)
+// 	})
 
-	log.Println("Dashboard running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
+// 	log.Println("Dashboard running at http://localhost:8080")
+// 	log.Fatal(http.ListenAndServe(":8080", nil))
+// }

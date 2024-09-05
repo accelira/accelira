@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/accelira/accelira/metrics"
@@ -13,12 +12,14 @@ import (
 
 // ReportGenerator handles the generation of performance reports.
 type ReportGenerator struct {
-	metricsMap *sync.Map
+	metricsMap *map[string]*metrics.EndpointMetrics
 }
 
 // NewReportGenerator creates a new ReportGenerator instance.
-func NewReportGenerator(metricsMap *sync.Map) *ReportGenerator {
-	return &ReportGenerator{metricsMap: metricsMap}
+func NewReportGenerator(metricsMap *map[string]*metrics.EndpointMetrics) *ReportGenerator {
+	return &ReportGenerator{
+		metricsMap: metricsMap,
+	}
 }
 
 // GenerateReport generates a detailed report for the performance test.
@@ -45,13 +46,11 @@ func (rg *ReportGenerator) printSummary() {
 func (rg *ReportGenerator) printChecks() {
 	color.New(color.FgMagenta).Println("\nChecks Status:")
 
-	rg.metricsMap.Range(func(key, value interface{}) bool {
-		epMetrics := value.(*metrics.EndpointMetrics)
+	for key, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.Error {
-			rg.printCheckStatus(key.(string), epMetrics)
+			rg.printCheckStatus(key, epMetrics)
 		}
-		return true
-	})
+	}
 }
 
 // printCheckStatus prints the status of an individual check.
@@ -88,15 +87,14 @@ func (rg *ReportGenerator) calculateRate(count, total int) float64 {
 
 // aggregateMetrics aggregates the total requests, errors, and duration from all endpoints.
 func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, totalDuration time.Duration) {
-	rg.metricsMap.Range(func(key, value interface{}) bool {
-		epMetrics := value.(*metrics.EndpointMetrics)
+
+	for _, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest {
 			totalRequests += epMetrics.Requests
 			totalErrors += epMetrics.Errors
 			totalDuration += epMetrics.TotalResponseTime
 		}
-		return true
-	})
+	}
 	return
 }
 
@@ -114,14 +112,11 @@ func (rg *ReportGenerator) printAverageDuration(totalRequests int, totalDuration
 func (rg *ReportGenerator) printDetailedReport() {
 	color.New(color.FgWhite, color.Bold).Println("\nEndpoint Metrics:")
 
-	rg.metricsMap.Range(func(key, value interface{}) bool {
-		endpoint := key.(string)
-		epMetrics := value.(*metrics.EndpointMetrics)
+	for endpoint, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest || epMetrics.Type == metrics.Group {
 			rg.printEndpointMetrics(endpoint, epMetrics)
 		}
-		return true
-	})
+	}
 }
 
 // printEndpointMetrics prints the metrics for a specific endpoint.

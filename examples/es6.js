@@ -16,10 +16,14 @@ export default function () {
     group.start("reqres website", function () {
 
         const getResponse1 = http.get("https://reqres.in/api/users");
-
+        // console.log('Received response', getResponse1);
         const assertions = {
-            'is status 200': (response) => response.StatusCode === 200,
+            'is status 200': (response) => {
+                // console.log('Checking response status', response.StatusCode);
+                return response.StatusCode === 200;
+            },
         };
+
 
         assert.check(getResponse1, assertions);
     });
