@@ -23,7 +23,6 @@ import (
 )
 
 var (
-	metricsReceived  int32
 	metricsWaitGroup sync.WaitGroup
 )
 
@@ -128,7 +127,7 @@ func executeScript(cmd *cobra.Command, args []string) {
 
 	displayConfig(vmConfig)
 
-	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*100)
+	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*3)
 
 	startMetricsCollection(metricsChannel)
 
@@ -180,7 +179,7 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 					progress*100,
 					elapsed.Seconds(),
 					config.Duration.Seconds(),
-					atomic.LoadInt32(&metricsReceived),
+					atomic.LoadInt32(&metricsprocessor.MetricsReceived),
 				)
 
 				// Update the terminal display

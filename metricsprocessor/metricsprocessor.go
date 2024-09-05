@@ -11,7 +11,7 @@ import (
 var (
 	MetricsMap      = make(map[string]*metrics.EndpointMetrics)
 	MetricsMapMutex sync.RWMutex
-	metricsReceived int32
+	MetricsReceived int32
 )
 
 func GatherMetrics(metricsChannel <-chan metrics.Metrics, metricsWaitGroup *sync.WaitGroup) {
@@ -72,7 +72,7 @@ func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.Endpo
 }
 
 func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
-	atomic.AddInt32(&metricsReceived, 1)
+	atomic.AddInt32(&MetricsReceived, 1)
 
 	storedMetric.Requests += newMetric.Requests
 	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
