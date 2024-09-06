@@ -133,13 +133,24 @@ func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metr
 	p90 := rg.quantileDuration(epMetrics, 0.9)
 	p95 := rg.quantileDuration(epMetrics, 0.95)
 
-	// TCP Handshake Latency percentiles
+	// TCP Handshake Latency
+	tcpMin := rg.quantileTCPHandshakeDuration(epMetrics, 0.0)
+	tcpMed := rg.quantileTCPHandshakeDuration(epMetrics, 0.5)
+	tcpMax := rg.quantileTCPHandshakeDuration(epMetrics, 1.0)
 	tcpP90 := rg.quantileTCPHandshakeDuration(epMetrics, 0.9)
 	tcpP95 := rg.quantileTCPHandshakeDuration(epMetrics, 0.95)
 
+	// DNS Lookup Latency
+	dnsMin := rg.quantileDNSLookupDuration(epMetrics, 0.0)
+	dnsMed := rg.quantileDNSLookupDuration(epMetrics, 0.5)
+	dnsMax := rg.quantileDNSLookupDuration(epMetrics, 1.0)
 	dnsP90 := rg.quantileDNSLookupDuration(epMetrics, 0.9)
 	dnsP95 := rg.quantileDNSLookupDuration(epMetrics, 0.95)
 
+	// TLS Handshake Latency
+	tlsMin := rg.quantileTLSHandshakeDuration(epMetrics, 0.0)
+	tlsMed := rg.quantileTLSHandshakeDuration(epMetrics, 0.5)
+	tlsMax := rg.quantileTLSHandshakeDuration(epMetrics, 1.0)
 	tlsP90 := rg.quantileTLSHandshakeDuration(epMetrics, 0.9)
 	tlsP95 := rg.quantileTLSHandshakeDuration(epMetrics, 0.95)
 
@@ -150,20 +161,17 @@ func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metr
 
 	if epMetrics.Type == metrics.HTTPRequest {
 		if epMetrics.TCPHandshakeLatencyTDigest != nil {
-			fmt.Printf("    └── TCP Handshake Latency: p(90)=%v p(95)=%v\n", tcpP90, tcpP95)
+			fmt.Printf("    └── TCP Handshake Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", tcpMin, tcpMed, tcpMax, tcpP90, tcpP95)
 		}
 
 		if epMetrics.DNSLookupLatencyTDigest != nil {
-			fmt.Printf("    └── DNS Lookup Latency: p(90)=%v p(95)=%v\n", dnsP90, dnsP95)
+			fmt.Printf("    └── DNS Lookup Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", dnsMin, dnsMed, dnsMax, dnsP90, dnsP95)
 		}
 
 		if epMetrics.TLSHandshakeLatencyTDigest != nil {
-			fmt.Printf("    └── TLS Handshake Latency: p(90)=%v p(95)=%v\n", tlsP90, tlsP95)
+			fmt.Printf("    └── TLS Handshake Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", tlsMin, tlsMed, tlsMax, tlsP90, tlsP95)
 		}
-
 	}
-	// Print TCP Handshake Latency stats if available
-
 }
 
 func (rg *ReportGenerator) quantileTLSHandshakeDuration(epMetrics *metrics.EndpointMetricsAggregated, quantile float64) time.Duration {
