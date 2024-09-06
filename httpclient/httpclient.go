@@ -91,7 +91,7 @@ func handleRequestError(err error, url, method string, duration time.Duration, m
 		statusCode = http.StatusInternalServerError
 	}
 
-	metrics1 := collectMetricsWithLatencies(url, method, 0, 0, statusCode, duration, 0, 0, 0)
+	metrics1 := collectMetricsWithLatencies(url, method, 1, 0, 0, statusCode, duration, 0, 0, 0)
 	metrics.SendMetrics(metrics1, metricsChannel)
 
 	return HttpResponse{Body: body, StatusCode: statusCode, URL: url, Method: method, Duration: duration}, nil
@@ -187,13 +187,13 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 	}
 
 	// Update metrics with bytes sent/received (including headers)
-	metrics1 := collectMetricsWithLatencies(url, method, bytesReceived, bytesSent, resp.StatusCode, duration, httpResp.TCPHandshakeLatency, httpResp.TLSHandshakeLatency, httpResp.DNSLookupLatency)
+	metrics1 := collectMetricsWithLatencies(url, method, 0, bytesReceived, bytesSent, resp.StatusCode, duration, httpResp.TCPHandshakeLatency, httpResp.TLSHandshakeLatency, httpResp.DNSLookupLatency)
 	metrics.SendMetrics(metrics1, metricsChannel)
 
 	return httpResp, nil
 }
 
-func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, statusCode int, duration, tcpHandshakeLatency, tlsHandshakeLatency, dnsLookupLatency time.Duration) metrics.Metrics {
+func collectMetricsWithLatencies(url, method string, errors int, bytesReceived, bytesSent, statusCode int, duration, tcpHandshakeLatency, tlsHandshakeLatency, dnsLookupLatency time.Duration) metrics.Metrics {
 	key := fmt.Sprintf("%s %s", method, url)
 
 	epMetrics := &metrics.EndpointMetrics{
@@ -201,14 +201,13 @@ func collectMetricsWithLatencies(url, method string, bytesReceived, bytesSent, s
 		URL:                 url,
 		Method:              method,
 		StatusCodeCounts:    map[int]int{statusCode: 1},
-		ResponseTimes:       duration,
+		ResponseTime:        duration,
 		TCPHandshakeLatency: tcpHandshakeLatency,
-		// TLSHandshakeLatency: tlsHandshakeLatency,
-		DNSLookupLatency:   dnsLookupLatency,
-		Requests:           1,
-		TotalResponseTime:  duration,
-		TotalBytesReceived: bytesReceived,
-		TotalBytesSent:     bytesSent,
+		TLSHandshakeLatency: tlsHandshakeLatency,
+		DNSLookupLatency:    dnsLookupLatency,
+		BytesReceived:       bytesReceived,
+		BytesSent:           bytesSent,
+		Errors:              errors,
 	}
 
 	return metrics.Metrics{EndpointMetricsMap: map[string]*metrics.EndpointMetrics{key: epMetrics}}

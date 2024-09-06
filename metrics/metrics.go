@@ -26,19 +26,17 @@ func CollectGroupMetrics(name string, duration time.Duration) Metrics {
 		URL:              name,
 		Method:           "GROUP",
 		StatusCodeCounts: make(map[int]int),
-		ResponseTimes:    0,
+		ResponseTime:     0,
 		Type:             Group,
 	}
 
-	epMetrics.Requests = 1
-	epMetrics.TotalResponseTime += duration
-	epMetrics.ResponseTimes = duration
+	epMetrics.ResponseTime = duration
 
 	return Metrics{EndpointMetricsMap: map[string]*EndpointMetrics{key: epMetrics}}
 }
 
 func CollectErrorMetrics(name string, result bool) Metrics {
-	key := fmt.Sprintf("%s", name)
+	key := name
 	epMetrics := &EndpointMetrics{
 		URL:         name,
 		Method:      "ERROR",
@@ -61,26 +59,60 @@ const (
 	Group       MetricType = "GROUP"
 )
 
+// type EndpointMetrics struct {
+// 	Type                       MetricType
+// 	URL                        string
+// 	Method                     string
+// 	StatusCodeCounts           map[int]int
+// 	ResponseTimes              time.Duration
+// 	ResponseTimesTDigest       *tdigest.TDigest
+// 	Requests                   int
+// 	TotalResponseTime          time.Duration
+// 	TotalBytesReceived         int
+// 	TotalBytesSent             int
+// 	Errors                     int
+// 	TCPHandshakeLatency        time.Duration
+// 	TCPHandshakeLatencyTDigest *tdigest.TDigest
+// 	DNSLookupLatency           time.Duration
+// 	DNSLookupLatencyTDigest    *tdigest.TDigest
+// 	TLSHandshakeLatency        time.Duration
+// 	TLSHandshakeLatencyTDigest *tdigest.TDigest
+// 	BodySendLatency            time.Duration
+// 	BodyReceiveLatency         time.Duration
+// 	CheckResult                bool
+// 	TotalCheckPassed           int
+// 	TotalCheckFailed           int
+// }
+
 type EndpointMetrics struct {
-	Type                       MetricType
-	URL                        string
-	Method                     string
+	Type                MetricType
+	URL                 string
+	Method              string
+	ResponseTime        time.Duration
+	TCPHandshakeLatency time.Duration
+	DNSLookupLatency    time.Duration
+	TLSHandshakeLatency time.Duration
+	BodySendLatency     time.Duration
+	BodyReceiveLatency  time.Duration
+	CheckResult         bool
+	StatusCodeCounts    map[int]int
+	BytesReceived       int
+	BytesSent           int
+	Errors              int
+}
+
+type EndpointMetricsAggregated struct {
 	StatusCodeCounts           map[int]int
-	ResponseTimes              time.Duration
-	ResponseTimesTDigest       *tdigest.TDigest
-	Requests                   int
+	TotalRequests              int
 	TotalResponseTime          time.Duration
+	ResponseTimesTDigest       *tdigest.TDigest
 	TotalBytesReceived         int
 	TotalBytesSent             int
-	Errors                     int
-	TCPHandshakeLatency        time.Duration
+	TotalErrors                int
 	TCPHandshakeLatencyTDigest *tdigest.TDigest
-	DNSLookupLatency           time.Duration
 	DNSLookupLatencyTDigest    *tdigest.TDigest
-	TLSHandshakeLatency        time.Duration
-	BodySendLatency            time.Duration
-	BodyReceiveLatency         time.Duration
-	CheckResult                bool
+	TLSHandshakeLatencyTDigest *tdigest.TDigest
 	TotalCheckPassed           int
 	TotalCheckFailed           int
+	Type                       MetricType
 }

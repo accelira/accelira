@@ -12,11 +12,11 @@ import (
 
 // ReportGenerator handles the generation of performance reports.
 type ReportGenerator struct {
-	metricsMap *map[string]*metrics.EndpointMetrics
+	metricsMap *map[string]*metrics.EndpointMetricsAggregated
 }
 
 // NewReportGenerator creates a new ReportGenerator instance.
-func NewReportGenerator(metricsMap *map[string]*metrics.EndpointMetrics) *ReportGenerator {
+func NewReportGenerator(metricsMap *map[string]*metrics.EndpointMetricsAggregated) *ReportGenerator {
 	return &ReportGenerator{
 		metricsMap: metricsMap,
 	}
@@ -57,7 +57,7 @@ func (rg *ReportGenerator) printChecks() {
 }
 
 // printCheckStatus prints the status of an individual check.
-func (rg *ReportGenerator) printCheckStatus(key string, epMetrics *metrics.EndpointMetrics) {
+func (rg *ReportGenerator) printCheckStatus(key string, epMetrics *metrics.EndpointMetricsAggregated) {
 	checkStatus, statusColor := rg.getCheckStatus(epMetrics)
 
 	statusLine := fmt.Sprintf("  %s %s", checkStatus, key)
@@ -73,7 +73,7 @@ func (rg *ReportGenerator) printCheckStatus(key string, epMetrics *metrics.Endpo
 }
 
 // getCheckStatus determines the status and color of the check.
-func (rg *ReportGenerator) getCheckStatus(epMetrics *metrics.EndpointMetrics) (string, color.Attribute) {
+func (rg *ReportGenerator) getCheckStatus(epMetrics *metrics.EndpointMetricsAggregated) (string, color.Attribute) {
 	if epMetrics.TotalCheckFailed > 0 {
 		return "✗ Failed", color.FgRed
 	}
@@ -93,8 +93,8 @@ func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, t
 
 	for _, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest {
-			totalRequests += epMetrics.Requests
-			totalErrors += epMetrics.Errors
+			totalRequests += 1
+			totalErrors += epMetrics.TotalErrors
 			totalDuration += epMetrics.TotalResponseTime
 			totalBytesReceived += epMetrics.TotalBytesReceived
 			totalBytesSent += epMetrics.TotalBytesSent
@@ -125,22 +125,71 @@ func (rg *ReportGenerator) printDetailedReport() {
 }
 
 // printEndpointMetrics prints the metrics for a specific endpoint.
-func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metrics.EndpointMetrics) {
-	avg := rg.roundDurationToTwoDecimals(epMetrics.TotalResponseTime / time.Duration(epMetrics.Requests))
+func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metrics.EndpointMetricsAggregated) {
+	avg := rg.roundDurationToTwoDecimals(epMetrics.TotalResponseTime / time.Duration(epMetrics.TotalRequests))
 	min := rg.quantileDuration(epMetrics, 0.0)
 	med := rg.quantileDuration(epMetrics, 0.5)
 	max := rg.quantileDuration(epMetrics, 1.0)
 	p90 := rg.quantileDuration(epMetrics, 0.9)
 	p95 := rg.quantileDuration(epMetrics, 0.95)
 
+	// TCP Handshake Latency percentiles
+	tcpP90 := rg.quantileTCPHandshakeDuration(epMetrics, 0.9)
+	tcpP95 := rg.quantileTCPHandshakeDuration(epMetrics, 0.95)
+
+	dnsP90 := rg.quantileDNSLookupDuration(epMetrics, 0.9)
+	dnsP95 := rg.quantileDNSLookupDuration(epMetrics, 0.95)
+
+	tlsP90 := rg.quantileTLSHandshakeDuration(epMetrics, 0.9)
+	tlsP95 := rg.quantileTLSHandshakeDuration(epMetrics, 0.95)
+
 	dots := rg.generateDots(endpoint, 35) // Adjust total length as needed
 
 	fmt.Printf("  %s%s avg=%v min=%v med=%v max=%v p(90)=%v p(95)=%v\n",
 		endpoint, dots, avg, min, med, max, p90, p95)
+
+	if epMetrics.Type == metrics.HTTPRequest {
+		if epMetrics.TCPHandshakeLatencyTDigest != nil {
+			fmt.Printf("    └── TCP Handshake Latency: p(90)=%v p(95)=%v\n", tcpP90, tcpP95)
+		}
+
+		if epMetrics.DNSLookupLatencyTDigest != nil {
+			fmt.Printf("    └── DNS Lookup Latency: p(90)=%v p(95)=%v\n", dnsP90, dnsP95)
+		}
+
+		if epMetrics.TLSHandshakeLatencyTDigest != nil {
+			fmt.Printf("    └── TLS Handshake Latency: p(90)=%v p(95)=%v\n", tlsP90, tlsP95)
+		}
+
+	}
+	// Print TCP Handshake Latency stats if available
+
+}
+
+func (rg *ReportGenerator) quantileTLSHandshakeDuration(epMetrics *metrics.EndpointMetricsAggregated, quantile float64) time.Duration {
+	if epMetrics.TLSHandshakeLatencyTDigest != nil {
+		return time.Duration(epMetrics.TLSHandshakeLatencyTDigest.Quantile(quantile)) * time.Millisecond
+	}
+	return 0
+}
+
+func (rg *ReportGenerator) quantileDNSLookupDuration(epMetrics *metrics.EndpointMetricsAggregated, quantile float64) time.Duration {
+	if epMetrics.DNSLookupLatencyTDigest != nil {
+		return time.Duration(epMetrics.DNSLookupLatencyTDigest.Quantile(quantile)) * time.Millisecond
+	}
+	return 0
+}
+
+// quantileTCPHandshakeDuration calculates the TCP handshake latency for a specific quantile.
+func (rg *ReportGenerator) quantileTCPHandshakeDuration(epMetrics *metrics.EndpointMetricsAggregated, quantile float64) time.Duration {
+	if epMetrics.TCPHandshakeLatencyTDigest != nil {
+		return time.Duration(epMetrics.TCPHandshakeLatencyTDigest.Quantile(quantile)) * time.Millisecond
+	}
+	return 0
 }
 
 // quantileDuration calculates the duration for a specific quantile from the TDigest.
-func (rg *ReportGenerator) quantileDuration(epMetrics *metrics.EndpointMetrics, quantile float64) time.Duration {
+func (rg *ReportGenerator) quantileDuration(epMetrics *metrics.EndpointMetricsAggregated, quantile float64) time.Duration {
 	return time.Duration(epMetrics.ResponseTimesTDigest.Quantile(quantile)) * time.Millisecond
 }
 

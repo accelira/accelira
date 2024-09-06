@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	MetricsMap      = make(map[string]*metrics.EndpointMetrics)
+	MetricsMap      = make(map[string]*metrics.EndpointMetricsAggregated)
 	MetricsMapMutex sync.RWMutex
 	MetricsReceived int32
 )
@@ -46,22 +46,25 @@ func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) 
 	mergeMetrics(storedMetric, endpointMetric)
 }
 
-func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetrics {
-	returnMetrics := &metrics.EndpointMetrics{
+func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.EndpointMetricsAggregated {
+	returnMetrics := &metrics.EndpointMetricsAggregated{
 		ResponseTimesTDigest:       tdigest.New(),
 		TCPHandshakeLatencyTDigest: tdigest.New(),
 		DNSLookupLatencyTDigest:    tdigest.New(),
-		Requests:                   endpointMetric.Requests,
-		TotalResponseTime:          endpointMetric.TotalResponseTime,
-		TotalBytesReceived:         endpointMetric.TotalBytesReceived,
-		TotalBytesSent:             endpointMetric.TotalBytesSent,
+		TLSHandshakeLatencyTDigest: tdigest.New(),
+		TotalRequests:              1,
+		TotalResponseTime:          endpointMetric.ResponseTime,
+		TotalBytesReceived:         endpointMetric.BytesReceived,
+		TotalBytesSent:             endpointMetric.BytesSent,
+		TotalErrors:                endpointMetric.Errors,
 		StatusCodeCounts:           make(map[int]int),
 		Type:                       endpointMetric.Type,
 	}
 
-	returnMetrics.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTimes.Milliseconds()), 1)
+	returnMetrics.ResponseTimesTDigest.Add(float64(endpointMetric.ResponseTime.Milliseconds()), 1)
 	returnMetrics.TCPHandshakeLatencyTDigest.Add(float64(endpointMetric.TCPHandshakeLatency.Milliseconds()), 1)
 	returnMetrics.DNSLookupLatencyTDigest.Add(float64(endpointMetric.DNSLookupLatency.Milliseconds()), 1)
+	returnMetrics.TLSHandshakeLatencyTDigest.Add(float64(endpointMetric.TLSHandshakeLatency.Milliseconds()), 1)
 	if endpointMetric.CheckResult {
 		returnMetrics.TotalCheckPassed += 1
 	} else {
@@ -71,13 +74,14 @@ func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.Endpo
 	return returnMetrics
 }
 
-func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
+func mergeMetrics(storedMetric *metrics.EndpointMetricsAggregated, newMetric *metrics.EndpointMetrics) {
 	atomic.AddInt32(&MetricsReceived, 1)
 
-	storedMetric.Requests += newMetric.Requests
-	storedMetric.TotalResponseTime += newMetric.TotalResponseTime
-	storedMetric.TotalBytesReceived += newMetric.TotalBytesReceived
-	storedMetric.TotalBytesSent += newMetric.TotalBytesSent
+	storedMetric.TotalRequests += 1
+	storedMetric.TotalResponseTime += newMetric.ResponseTime
+	storedMetric.TotalBytesReceived += newMetric.BytesReceived
+	storedMetric.TotalBytesSent += newMetric.BytesSent
+	storedMetric.TotalErrors += newMetric.Errors
 	if newMetric.CheckResult {
 		storedMetric.TotalCheckPassed += 1
 	} else {
@@ -91,12 +95,15 @@ func mergeMetrics(storedMetric, newMetric *metrics.EndpointMetrics) {
 	mergeTDigests(storedMetric, newMetric)
 }
 
-func mergeTDigests(storedMetric, newMetric *metrics.EndpointMetrics) {
-	storedMetric.ResponseTimesTDigest.Add(float64(newMetric.ResponseTimes.Milliseconds()), 1)
+func mergeTDigests(storedMetric *metrics.EndpointMetricsAggregated, newMetric *metrics.EndpointMetrics) {
+	storedMetric.ResponseTimesTDigest.Add(float64(newMetric.ResponseTime.Milliseconds()), 1)
 	if newMetric.TCPHandshakeLatency.Milliseconds() > 0 {
 		storedMetric.TCPHandshakeLatencyTDigest.Add(float64(newMetric.TCPHandshakeLatency.Milliseconds()), 1)
 	}
 	if newMetric.DNSLookupLatency.Milliseconds() > 0 {
 		storedMetric.DNSLookupLatencyTDigest.Add(float64(newMetric.DNSLookupLatency.Milliseconds()), 1)
+	}
+	if newMetric.TLSHandshakeLatency.Milliseconds() > 0 {
+		storedMetric.TLSHandshakeLatencyTDigest.Add(float64(newMetric.TLSHandshakeLatency.Milliseconds()), 1)
 	}
 }
