@@ -143,8 +143,12 @@ func executeScript(cmd *cobra.Command, args []string) {
 	reportGenerator.GenerateReport()
 }
 
-func displayConfig(config *moduleloader.Config) {
-	fmt.Printf("Concurrent Users: %d\nIterations: %d\nRamp-up Rate: %d\nDuration: %s\n", config.ConcurrentUsers, config.Iterations, config.RampUpRate, config.Duration)
+func displayConfig(c *moduleloader.Config) {
+	// fmt.Printf("Concurrent Users: %d\nIterations: %d\nRamp-up Rate: %d\nDuration: %s\n",
+	// 	c.ConcurrentUsers, c.Iterations, c.RampUpRate, c.Duration)
+
+	fmt.Printf("Concurrent Users: %d\nRamp-up Rate: %d\nDuration: %s\n",
+		c.ConcurrentUsers, c.RampUpRate, c.Duration)
 }
 
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {

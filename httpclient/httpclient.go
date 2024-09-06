@@ -98,6 +98,7 @@ func handleRequestError(err error, url, method string, duration time.Duration, m
 }
 func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChannel chan<- metrics.Metrics) (HttpResponse, error) {
 	var dnsStart, dnsEnd, connectStart, connectEnd, wroteHeadersTime, wroteRequestTime, gotFirstResponseByteTime, tlsHandshakeStart, tlsHandshakeEnd time.Time
+	var bytesSent, bytesReceived int // To track total bytes sent/received
 
 	trace := &httptrace.ClientTrace{
 		DNSStart:          func(info httptrace.DNSStartInfo) { dnsStart = time.Now() },
@@ -124,6 +125,13 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 
 	req.Header.Set("User-Agent", "Accelira perf testing tool/1.0")
 
+	// Calculate request headers size
+	var reqHeadersSize int
+	for k, v := range req.Header {
+		reqHeadersSize += len(k) + len(v[0]) + 4 // "Key: Value\r\n"
+	}
+	bytesSent += reqHeadersSize
+
 	startTime := time.Now()
 	resp, err := hc.client.Do(req)
 	duration := time.Since(startTime)
@@ -137,9 +145,23 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 	defer hc.bufferPool.Put(buf)
 
 	var responseBody bytes.Buffer
-	_, err = io.CopyBuffer(&responseBody, resp.Body, *buf)
+	bytesCopied, err := io.CopyBuffer(&responseBody, resp.Body, *buf)
 	if err != nil {
 		return HttpResponse{}, err
+	}
+
+	// Calculate response headers size
+	var respHeadersSize int
+	for k, v := range resp.Header {
+		respHeadersSize += len(k) + len(v[0]) + 4 // "Key: Value\r\n"
+	}
+	bytesReceived += respHeadersSize
+	bytesReceived += int(bytesCopied) // Add the body size
+
+	// Adding the request body size if any
+	if body != nil {
+		bodySize, _ := io.Copy(io.Discard, body) // Measure body length
+		bytesSent += int(bodySize)
 	}
 
 	if tlsHandshakeEnd.Sub(tlsHandshakeStart) > 100*time.Second {
@@ -164,7 +186,8 @@ func (hc *HTTPClient) DoRequest(url, method string, body io.Reader, metricsChann
 		DNSLookupLatency:    dnsEnd.Sub(dnsStart),
 	}
 
-	metrics1 := collectMetricsWithLatencies(url, method, responseBody.Len(), len(req.URL.String()), resp.StatusCode, duration, httpResp.TCPHandshakeLatency, httpResp.TLSHandshakeLatency, httpResp.DNSLookupLatency)
+	// Update metrics with bytes sent/received (including headers)
+	metrics1 := collectMetricsWithLatencies(url, method, bytesReceived, bytesSent, resp.StatusCode, duration, httpResp.TCPHandshakeLatency, httpResp.TLSHandshakeLatency, httpResp.DNSLookupLatency)
 	metrics.SendMetrics(metrics1, metricsChannel)
 
 	return httpResp, nil

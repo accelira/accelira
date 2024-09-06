@@ -77,6 +77,9 @@ type EndpointMetrics struct {
 	TCPHandshakeLatencyTDigest *tdigest.TDigest
 	DNSLookupLatency           time.Duration
 	DNSLookupLatencyTDigest    *tdigest.TDigest
+	TLSHandshakeLatency        time.Duration
+	BodySendLatency            time.Duration
+	BodyReceiveLatency         time.Duration
 	CheckResult                bool
 	TotalCheckPassed           int
 	TotalCheckFailed           int

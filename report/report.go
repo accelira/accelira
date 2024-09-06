@@ -34,11 +34,14 @@ func (rg *ReportGenerator) printSummary() {
 	color.New(color.FgCyan, color.Bold).Println("\nPerformance Test Report")
 	color.New(color.FgWhite).Println("\nSummary:")
 
-	totalRequests, totalErrors, totalDuration := rg.aggregateMetrics()
+	totalRequests, totalErrors, totalDuration, totalBytesReceived, totalBytesSent := rg.aggregateMetrics()
 
 	fmt.Printf("  Total Requests:   %d\n", totalRequests)
 	fmt.Printf("  Total Errors:     %d\n", totalErrors)
 	fmt.Printf("  Total Duration:   %v\n", totalDuration)
+	fmt.Printf("  Total BytesReceived:   %v\n", totalBytesReceived)
+	fmt.Printf("  Total BytesSent:   %v\n", totalBytesSent)
+
 	rg.printAverageDuration(totalRequests, totalDuration)
 }
 
@@ -86,13 +89,15 @@ func (rg *ReportGenerator) calculateRate(count, total int) float64 {
 }
 
 // aggregateMetrics aggregates the total requests, errors, and duration from all endpoints.
-func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, totalDuration time.Duration) {
+func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, totalDuration time.Duration, totalBytesReceived int, totalBytesSent int) {
 
 	for _, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest {
 			totalRequests += epMetrics.Requests
 			totalErrors += epMetrics.Errors
 			totalDuration += epMetrics.TotalResponseTime
+			totalBytesReceived += epMetrics.TotalBytesReceived
+			totalBytesSent += epMetrics.TotalBytesSent
 		}
 	}
 	return
