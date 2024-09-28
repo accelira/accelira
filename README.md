@@ -62,7 +62,7 @@ Create test.js and paste this:
 ```javascript
 import http from "Accelira/http";
 import config from "Accelira/config";
-config.setIterations(10);
+config.setDuration("10s");
 config.setConcurrentUsers(5);
 export default function () {
     http.get("https://example.com");
