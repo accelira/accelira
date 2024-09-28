@@ -146,8 +146,6 @@ A: Accelira is cross-platform, running smoothly on Windows, macOS, and Linux.
 **Q: How can I troubleshoot common errors?**  
 A: Check our [Troubleshooting Guide](https://github.com/accelira/accelira/wiki/Troubleshooting).
 
-## Sponsors
-Love Accelira? Consider supporting its development. [Become a sponsor](https://github.com/sponsors/accelira) and get your logo featured here!
 
 ## Code of Conduct
 We expect all contributors to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
