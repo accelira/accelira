@@ -6,7 +6,7 @@ import { options } from './options.js';
 import http from "Accelira/http";
 import group from "Accelira/group";
 
-config.setIterations(options.iterations);
+config.setDuration(options.duration);
 config.setRampUpRate(options.rampUpRate);
 config.setConcurrentUsers(options.concurrentUsers);
 
@@ -34,12 +34,12 @@ export default function () {
         const token = jwt.sign(payload, privateKey, signOptions);
 
         // Output the token
-        // console.log(token);
+        console.log(token);
 
 
-        const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
+        // const getUrl = "https://jsonplaceholder.typicode.com/todos/1";
 
-        const getResponse = http.get(getUrl).assertStatus(200)
+        // const getResponse = http.get(getUrl).assertStatus(200)
 
     })
 

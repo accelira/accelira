@@ -2,8 +2,8 @@
 
 export const options = {
     iterations: 5,
-    concurrentUsers: 1000,
+    concurrentUsers: 100,
     rampUpRate: 1000,
-    duration: "30s"
+    duration: "10s"
     // Add more configuration options as needed
   };

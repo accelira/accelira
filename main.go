@@ -125,7 +125,7 @@ func executeScript(cmd *cobra.Command, args []string) {
 
 	displayConfig(vmConfig)
 
-	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*3)
+	metricsChannel := make(chan metrics.Metrics, vmConfig.ConcurrentUsers*5)
 
 	startMetricsCollection(metricsChannel)
 
