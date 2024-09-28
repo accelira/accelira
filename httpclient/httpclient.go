@@ -21,33 +21,14 @@ type HTTPClient struct {
 }
 
 func NewHTTPClient() *HTTPClient {
-	// dialer := &net.Dialer{
-	// 	Timeout:   10 * time.Second,
-	// 	KeepAlive: 10 * time.Second,
-	// 	Control: func(network, address string, c syscall.RawConn) error {
-	// 		var err error
-	// 		c.Control(func(fd uintptr) {
-	// 			// Set send buffer size (e.g., 1MB)
-	// 			err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_SNDBUF, 1024*1024*4)
-	// 			if err != nil {
-	// 				return
-	// 			}
-	// 			// Set receive buffer size (e.g., 1MB)
-	// 			err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1024*1024*4)
-	// 		})
-	// 		return err
-	// 	},
-	// }
 
 	transport := &http.Transport{
-		// DialContext:         dialer.DialContext,
 		MaxIdleConns:        100,
 		IdleConnTimeout:     10 * time.Second,
 		DisableKeepAlives:   false,
 		MaxIdleConnsPerHost: 100,
 		TLSHandshakeTimeout: 10 * time.Second, // Timeout for TLS handshake
-		ForceAttemptHTTP2:   true,             // Enable HTTP/2
-		// TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		ForceAttemptHTTP2:   true,
 	}
 
 	client := &http.Client{
@@ -70,18 +51,18 @@ func handleRequestError(err error, url, method string, duration time.Duration, m
 	var body string
 
 	switch e := err.(type) {
-	case net.Error:
-		if e.Timeout() {
-			body = "Request timed out"
-			statusCode = http.StatusRequestTimeout
-		} else {
-			body = "Network error: " + e.Error()
-			statusCode = http.StatusNetworkAuthenticationRequired
-		}
 	case *net.OpError:
 		if e.Op == "dial" && e.Err.Error() == "connection refused" {
 			body = "Connection refused"
 			statusCode = http.StatusServiceUnavailable
+		} else {
+			body = "Network error: " + e.Error()
+			statusCode = http.StatusNetworkAuthenticationRequired
+		}
+	case net.Error:
+		if e.Timeout() {
+			body = "Request timed out"
+			statusCode = http.StatusRequestTimeout
 		} else {
 			body = "Network error: " + e.Error()
 			statusCode = http.StatusNetworkAuthenticationRequired

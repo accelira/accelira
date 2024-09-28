@@ -16,7 +16,7 @@ func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error)
 	moduleloader.SetupConsoleModule(vm)
 	_ = moduleloader.InitializeModuleExport(vm)
 
-	vm.Set("require", moduleloader.SetupRequire(vm, config, nil)) // Pass the correct arguments
+	vm.Set("require", moduleloader.SetupRequire(vm, config, nil))
 
 	_, err := vm.RunScript("config.js", string(content))
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/accelira/accelira/dashboard"
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/metricsprocessor"
 	"github.com/accelira/accelira/moduleloader"
@@ -30,17 +32,13 @@ func main() {
 	// Start the real-time monitoring dashboard
 	// go startDashboard()
 
+	//graceful shutdown
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 
 	go func() {
 		<-signalChan
-		// Perform cleanup actions here before exiting
 		printMemoryUsage()
-		// reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
-
-		// // Generate the report
-		// reportGenerator.GenerateReport()
 		os.Exit(0)
 	}()
 
@@ -144,8 +142,6 @@ func executeScript(cmd *cobra.Command, args []string) {
 }
 
 func displayConfig(c *moduleloader.Config) {
-	// fmt.Printf("Concurrent Users: %d\nIterations: %d\nRamp-up Rate: %d\nDuration: %s\n",
-	// 	c.ConcurrentUsers, c.Iterations, c.RampUpRate, c.Duration)
 
 	fmt.Printf("Concurrent Users: %d\nRamp-up Rate: %d\nDuration: %s\n",
 		c.ConcurrentUsers, c.RampUpRate, c.Duration)
@@ -219,31 +215,40 @@ func checkError(message string, err error) {
 	}
 }
 
-// const htmlContent = dashboard.HtmlContent
+const htmlContent = dashboard.HtmlContent
 
-// func startDashboard() {
-// 	// Handle requests to the root path with the HTML content
-// 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-// 		w.Header().Set("Content-Type", "text/html")
-// 		w.Write([]byte(htmlContent))
-// 	})
+func startDashboard() {
+	// Serve the dashboard HTML content at the root path
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(htmlContent))
+	})
 
-// 	// Serve metrics at a different endpoint
-// 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-// 		metrics1 := make(map[string]map[string]interface{})
-// 		metricsprocessor.MetricsMap.Range(func(key, value interface{}) bool {
-// 			endpointMetrics := value.(*metrics.EndpointMetrics)
-// 			metrics1[key.(string)] = map[string]interface{}{
-// 				// "50thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.5),
-// 				// "90thPercentileLatency": endpointMetrics.ResponseTimesTDigest.Quantile(0.9),
-// 				"realtimeResponse": endpointMetrics.ResponseTimes.Milliseconds(),
-// 			}
-// 			return true
-// 		})
-// 		w.Header().Set("Content-Type", "application/json")
-// 		json.NewEncoder(w).Encode(metrics1)
-// 	})
+	// Serve the metrics at a different endpoint
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metrics1 := make(map[string]map[string]interface{})
 
-// 	log.Println("Dashboard running at http://localhost:8080")
-// 	log.Fatal(http.ListenAndServe(":8080", nil))
-// }
+		// Iterate over the map
+		for key, value := range metricsprocessor.MetricsMap {
+			// Directly use value since it's already of type *metrics.EndpointMetricsAggregated
+
+			metrics1[key] = map[string]interface{}{
+				// Uncomment if ResponseTimesTDigest is available
+				// "50thPercentileLatency": value.ResponseTimesTDigest.Quantile(0.5),
+				// "90thPercentileLatency": value.ResponseTimesTDigest.Quantile(0.9),
+
+				// Use ResponseTimes if it's a valid time.Duration
+				"realtimeResponse": value.ResponseTimesTDigest.Quantile(95),
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(metrics1); err != nil {
+			http.Error(w, "Failed to encode metrics", http.StatusInternalServerError)
+		}
+	})
+
+	// Log the dashboard URL and start the server
+	log.Println("Dashboard running at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
