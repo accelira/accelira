@@ -14,7 +14,7 @@ rm -rf ${BUILD_DIR}
 mkdir -p ${BUILD_DIR}
 
 # Build the project
-go build -v -o ${BUILD_DIR}/${PACKAGE_NAME} ${CMD_DIR}/main.go
+go build -v -o ${BUILD_DIR}/${PACKAGE_NAME} main.go
 
 # Create the tarball
 tar -czvf ${TAR_NAME} -C ${BUILD_DIR} ${PACKAGE_NAME}
