@@ -93,7 +93,7 @@ func (rg *ReportGenerator) aggregateMetrics() (totalRequests, totalErrors int, t
 
 	for _, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest {
-			totalRequests += 1
+			totalRequests += epMetrics.TotalRequests
 			totalErrors += epMetrics.TotalErrors
 			totalDuration += epMetrics.TotalResponseTime
 			totalBytesReceived += epMetrics.TotalBytesReceived
