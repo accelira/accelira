@@ -158,5 +158,13 @@ Let’s grow together:
 
 For more details, visit our [GitHub Pages site](https://accelira.github.io/accelira/).
 
+## Secret Management
+
+**Important:** Never commit secrets such as `private.key` or API keys to the repository.
+
+- Use environment variables (e.g., `ACCELIRA_PRIVATE_KEY`) or the `accelira.yaml` config file (see `util/config.go`) to provide secrets securely.
+- Ensure `private.key` is listed in `.gitignore`.
+- If you accidentally commit a secret, remove it from the repo history and rotate the secret immediately.
+
 # Acknowledgments
 A big shoutout to K6 and the open-source community for paving the way. We’re standing on the shoulders of giants.

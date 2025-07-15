@@ -8,11 +8,38 @@ import (
 	"github.com/influxdata/tdigest"
 )
 
+const numShards = 16
+
+type MetricsShard struct {
+	Map   map[string]*metrics.EndpointMetricsAggregated
+	Mutex sync.RWMutex
+}
+
 var (
-	MetricsMap      = make(map[string]*metrics.EndpointMetricsAggregated)
-	MetricsMapMutex sync.RWMutex
+	metricsShards [numShards]MetricsShard
 	MetricsReceived int32
 )
+
+func init() {
+	for i := 0; i < numShards; i++ {
+		metricsShards[i].Map = make(map[string]*metrics.EndpointMetricsAggregated)
+	}
+}
+
+func getShard(key string) *MetricsShard {
+	h := fnv32(key)
+	return &metricsShards[uint(h)%uint(numShards)]
+}
+
+func fnv32(key string) uint32 {
+	var hash uint32 = 2166136261
+	const prime32 = 16777619
+	for i := 0; i < len(key); i++ {
+		hash ^= uint32(key[i])
+		hash *= prime32
+	}
+	return hash
+}
 
 func GatherMetrics(metricsChannel <-chan metrics.Metrics, metricsWaitGroup *sync.WaitGroup) {
 	defer metricsWaitGroup.Done()
@@ -29,17 +56,14 @@ func processMetrics(metric metrics.Metrics) {
 }
 
 func processEndpointMetric(key string, endpointMetric *metrics.EndpointMetrics) {
-	// MetricsMapMutex.RLock()
-	storedMetric, isExisting := MetricsMap[key]
-	// MetricsMapMutex.RUnlock()
+	shard := getShard(key)
+	shard.Mutex.Lock()
+	defer shard.Mutex.Unlock()
 
-	// fmt.Printf("storedMetric %v \n", storedMetric)
-
+	storedMetric, isExisting := shard.Map[key]
 	if !isExisting {
 		newMetric := initializeNewMetric(endpointMetric)
-		// MetricsMapMutex.Lock()
-		MetricsMap[key] = newMetric
-		// MetricsMapMutex.Unlock()
+		shard.Map[key] = newMetric
 		return
 	}
 
@@ -72,6 +96,20 @@ func initializeNewMetric(endpointMetric *metrics.EndpointMetrics) *metrics.Endpo
 	}
 
 	return returnMetrics
+}
+
+// GetAllAggregatedMetrics returns a merged map of all metrics from all shards.
+func GetAllAggregatedMetrics() map[string]*metrics.EndpointMetricsAggregated {
+	result := make(map[string]*metrics.EndpointMetricsAggregated)
+	for i := 0; i < numShards; i++ {
+		shard := &metricsShards[i]
+		shard.Mutex.RLock()
+		for k, v := range shard.Map {
+			result[k] = v
+		}
+		shard.Mutex.RUnlock()
+	}
+	return result
 }
 
 func mergeMetrics(storedMetric *metrics.EndpointMetricsAggregated, newMetric *metrics.EndpointMetrics) {

@@ -174,7 +174,8 @@ func executeScript(cmd *cobra.Command, args []string) {
 	metricsWaitGroup.Wait()
 
 	// report.GenerateReport(&metricsprocessor.MetricsMap)
-	reportGenerator := report.NewReportGenerator(&metricsprocessor.MetricsMap)
+	metricsMap := metricsprocessor.GetAllAggregatedMetrics()
+	reportGenerator := report.NewReportGenerator(&metricsMap)
 
 	// Generate the report
 	reportGenerator.GenerateReport()
@@ -282,7 +283,7 @@ func startDashboard() {
 		metrics1 := make(map[string]map[string]interface{})
 
 		// Iterate over the map
-		for key, value := range metricsprocessor.MetricsMap {
+		for key, value := range metricsprocessor.GetAllAggregatedMetrics() {
 			// Directly use value since it's already of type *metrics.EndpointMetricsAggregated
 
 			metrics1[key] = map[string]interface{}{
