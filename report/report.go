@@ -27,23 +27,49 @@ func (rg *ReportGenerator) GenerateReport() {
 	rg.printSummary()
 	rg.printChecks()
 	rg.printDetailedReport()
+	rg.printFinalBanner()
+}
+
+func (rg *ReportGenerator) printFinalBanner() {
+	totalRequests, totalErrors, _, _, _ := rg.aggregateMetrics()
+	divider := strings.Repeat("═", 70)
+	color.New(color.FgCyan, color.Bold).Printf("%s\n", divider)
+	if totalRequests > 0 && totalErrors == 0 {
+		color.New(color.FgGreen, color.Bold).Printf("%35s\n", "✅ TEST PASSED")
+	} else if totalRequests == 0 {
+		color.New(color.FgYellow, color.Bold).Printf("%35s\n", "⚠️  NO REQUESTS EXECUTED")
+	} else {
+		color.New(color.FgRed, color.Bold).Printf("%35s\n", "❌ TEST FAILED")
+	}
+	color.New(color.FgCyan, color.Bold).Printf("%s\n", divider)
 }
 
 // printSummary prints the summary of the performance test.
 func (rg *ReportGenerator) printSummary() {
-	color.New(color.FgCyan, color.Bold).Println("\nPerformance Test Report")
-	color.New(color.FgWhite).Println("\nSummary:")
+	divider := strings.Repeat("═", 70)
+	color.New(color.FgCyan, color.Bold).Printf("\n%s\n", divider)
+	color.New(color.FgHiWhite, color.Bold).Printf("%26s %s\n", "🚀 Accelira Performance Test Report", "")
+	color.New(color.FgCyan, color.Bold).Printf("%s\n\n", divider)
+
+	color.New(color.FgWhite, color.Bold).Println("Summary:")
+	color.New(color.FgWhite).Println(strings.Repeat("─", 70))
 
 	totalRequests, totalErrors, totalDuration, totalBytesReceived, totalBytesSent := rg.aggregateMetrics()
 
-	fmt.Printf("  Total Requests:   %d\n", totalRequests)
-	fmt.Printf("  Total Errors:     %d\n", totalErrors)
-	fmt.Printf("  Total Duration:   %v\n", totalDuration)
-	fmt.Printf("  Total BytesReceived:   %v\n", totalBytesReceived)
-	fmt.Printf("  Total BytesSent:   %v\n", totalBytesSent)
+	fmt.Printf("  %-18s :  %s\n", "Total Requests", formatInt(totalRequests))
+	fmt.Printf("  %-18s :  %s\n", "Total Errors", formatInt(totalErrors))
+	fmt.Printf("  %-18s :  %v\n", "Total Duration", totalDuration)
+	fmt.Printf("  %-18s :  %s\n", "Bytes Received", formatInt(totalBytesReceived))
+	fmt.Printf("  %-18s :  %s\n", "Bytes Sent", formatInt(totalBytesSent))
 
 	rg.printAverageDuration(totalRequests, totalDuration)
+	color.New(color.FgWhite).Println(strings.Repeat("─", 70))
 }
+
+func formatInt(n int) string {
+	return fmt.Sprintf("%d", n)
+}
+
 
 // printChecks prints the status of various checks.
 func (rg *ReportGenerator) printChecks() {
@@ -116,13 +142,18 @@ func (rg *ReportGenerator) printAverageDuration(totalRequests int, totalDuration
 // printDetailedReport prints detailed metrics for each endpoint.
 func (rg *ReportGenerator) printDetailedReport() {
 	color.New(color.FgWhite, color.Bold).Println("\nEndpoint Metrics:")
+	color.New(color.FgWhite).Println(strings.Repeat("─", 70))
+	fmt.Printf("  %-35s %-7s %-7s %-7s %-7s %-7s %-7s\n", "ENDPOINT", "AVG", "MIN", "MED", "MAX", "P90", "P95")
+	color.New(color.FgWhite).Println(strings.Repeat("─", 70))
 
 	for endpoint, epMetrics := range *rg.metricsMap {
 		if epMetrics.Type == metrics.HTTPRequest || epMetrics.Type == metrics.Group {
 			rg.printEndpointMetrics(endpoint, epMetrics)
 		}
 	}
+	color.New(color.FgWhite).Println(strings.Repeat("─", 70))
 }
+
 
 // printEndpointMetrics prints the metrics for a specific endpoint.
 func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metrics.EndpointMetricsAggregated) {
@@ -154,22 +185,21 @@ func (rg *ReportGenerator) printEndpointMetrics(endpoint string, epMetrics *metr
 	tlsP90 := rg.quantileTLSHandshakeDuration(epMetrics, 0.9)
 	tlsP95 := rg.quantileTLSHandshakeDuration(epMetrics, 0.95)
 
-	dots := rg.generateDots(endpoint, 35) // Adjust total length as needed
 
-	fmt.Printf("  %s%s avg=%v min=%v med=%v max=%v p(90)=%v p(95)=%v\n",
-		endpoint, dots, avg, min, med, max, p90, p95)
+	fmt.Printf("  %-35s %-7v %-7v %-7v %-7v %-7v %-7v\n",
+		endpoint, avg, min, med, max, p90, p95)
 
 	if epMetrics.Type == metrics.HTTPRequest {
 		if epMetrics.TCPHandshakeLatencyTDigest != nil {
-			fmt.Printf("    └── TCP Handshake Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", tcpMin, tcpMed, tcpMax, tcpP90, tcpP95)
+			fmt.Printf("    └── TCP Handshake Latency: min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n", tcpMin, tcpMed, tcpMax, tcpP90, tcpP95)
 		}
 
 		if epMetrics.DNSLookupLatencyTDigest != nil {
-			fmt.Printf("    └── DNS Lookup Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", dnsMin, dnsMed, dnsMax, dnsP90, dnsP95)
+			fmt.Printf("    └── DNS Lookup Latency: min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n", dnsMin, dnsMed, dnsMax, dnsP90, dnsP95)
 		}
 
 		if epMetrics.TLSHandshakeLatencyTDigest != nil {
-			fmt.Printf("    └── TLS Handshake Latency: min=%v med=%v max=%v p(90)=%v p(95)=%v\n", tlsMin, tlsMed, tlsMax, tlsP90, tlsP95)
+			fmt.Printf("    └── TLS Handshake Latency: min=%v  med=%v  max=%v  p(90)=%v  p(95)=%v\n", tlsMin, tlsMed, tlsMax, tlsP90, tlsP95)
 		}
 	}
 }
