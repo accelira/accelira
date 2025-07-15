@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -12,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"net/http"
 
 	"github.com/accelira/accelira/dashboard"
 	"github.com/accelira/accelira/metrics"
@@ -22,6 +21,7 @@ import (
 	"github.com/accelira/accelira/vmhandler"
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 var (
@@ -43,11 +43,16 @@ func main() {
 	}()
 
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
+		err := http.ListenAndServe("localhost:6060", nil)
+		if err != nil {
+			util.GetLogger().Error("pprof server error", zap.Error(err))
+		} else {
+			util.GetLogger().Info("pprof server started on localhost:6060")
+		}
 	}()
 	rootCmd := createRootCommand()
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalf("Command execution failed: %v", err)
+		util.GetLogger().Fatal("Command execution failed", zap.Error(err))
 	}
 	printMemoryUsage()
 }
@@ -80,8 +85,12 @@ func createRunCommand() *cobra.Command {
 func printMemoryUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	fmt.Printf("\nAlloc = %v MiB\tTotalAlloc = %v MiB\tSys = %v MiB\tNumGC = %v\n",
-		bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC)
+	util.GetLogger().Info("Memory usage",
+		zap.Uint64("AllocMiB", bToMb(m.Alloc)),
+		zap.Uint64("TotalAllocMiB", bToMb(m.TotalAlloc)),
+		zap.Uint64("SysMiB", bToMb(m.Sys)),
+		zap.Uint64("NumGC", uint64(m.NumGC)),
+	)
 }
 
 func bToMb(b uint64) uint64 {
@@ -172,12 +181,18 @@ func executeScript(cmd *cobra.Command, args []string) {
 }
 
 func displayConfig(c *moduleloader.Config) {
-	fmt.Printf("Concurrent Users: %d\nRamp-up Rate: %d\nDuration: %s\n", c.ConcurrentUsers, c.RampUpRate, c.Duration)
+	util.GetLogger().Info("Test configuration",
+		zap.Int("ConcurrentUsers", c.ConcurrentUsers),
+		zap.Int("RampUpRate", c.RampUpRate),
+		zap.Duration("Duration", c.Duration),
+		zap.Int("RPS", c.RPS),
+		zap.Int("Iterations", c.Iterations),
+	)
 	if c.RPS > 0 {
-		fmt.Printf("RPS: %d\n", c.RPS)
+		util.GetLogger().Info("RPS override set", zap.Int("RPS", c.RPS))
 	}
 	if c.Iterations > 0 {
-		fmt.Printf("Iterations per user: %d\n", c.Iterations)
+		util.GetLogger().Info("Iterations per user override set", zap.Int("Iterations", c.Iterations))
 	}
 }
 
@@ -206,19 +221,16 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 					progress = 1.0
 				}
 				filledLength := int(progress * float64(progressBarLength))
-				bar := fmt.Sprintf(
-					"\033[0G\033[32m[%s%s]\033[0m %.2f%% \033[33mElapsed:\033[0m %.2f sec / %.2f sec, \033[34mResponses received:\033[0m %d",
-					strings.Repeat("▓", filledLength),
-					strings.Repeat("░", progressBarLength-filledLength),
-					progress*100,
-					elapsed.Seconds(),
-					config.Duration.Seconds(),
-					atomic.LoadInt32(&metricsprocessor.MetricsReceived),
-				)
+				bar :=
+					"\033[0G\033[32m[" + strings.Repeat("▓", filledLength) + strings.Repeat("░", progressBarLength-filledLength) + "]\033[0m " +
+					fmt.Sprintf("%.2f%% ", progress*100) +
+					"\033[33mElapsed:\033[0m " + fmt.Sprintf("%.2f", elapsed.Seconds()) +
+					" sec / " + fmt.Sprintf("%.2f", config.Duration.Seconds()) +
+					" sec, \033[34mResponses received:\033[0m " + fmt.Sprintf("%d", atomic.LoadInt32(&metricsprocessor.MetricsReceived))
 
 				// Update the terminal display
 				fmt.Print(bar)
-				time.Sleep(100 * time.Millisecond) // Update every 50ms
+				time.Sleep(100 * time.Millisecond) // Update every 100ms
 			}
 		}
 	}()
@@ -241,11 +253,18 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 		config.Duration.Seconds(),
 		config.Duration.Seconds(),
 	)
+	util.GetLogger().Info("Test execution complete",
+		zap.Int("ConcurrentUsers", config.ConcurrentUsers),
+		zap.Duration("Duration", config.Duration),
+		zap.Int("RPS", config.RPS),
+		zap.Int("Iterations", config.Iterations),
+		zap.Int32("TotalResponses", atomic.LoadInt32(&metricsprocessor.MetricsReceived)),
+	)
 }
 
 func checkError(message string, err error) {
 	if err != nil {
-		log.Fatalf("%s: %v", message, err)
+		util.GetLogger().Fatal(message, zap.Error(err))
 	}
 }
 
@@ -283,6 +302,8 @@ func startDashboard() {
 	})
 
 	// Log the dashboard URL and start the server
-	log.Println("Dashboard running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	util.GetLogger().Info("Dashboard running", zap.String("url", "http://localhost:8080"))
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		util.GetLogger().Fatal("Dashboard server failed", zap.Error(err))
+	}
 }

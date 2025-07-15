@@ -8,6 +8,8 @@ import (
 	"github.com/accelira/accelira/metrics"
 	"github.com/accelira/accelira/moduleloader"
 	"github.com/dop251/goja"
+	"github.com/accelira/accelira/util"
+	"go.uber.org/zap"
 )
 
 func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error) {
@@ -20,7 +22,7 @@ func CreateConfigVM(content string) (*goja.Runtime, *moduleloader.Config, error)
 
 	_, err := vm.RunScript("config.js", string(content))
 	if err != nil {
-		return nil, nil, fmt.Errorf("error running configuration script: %w", err)
+		return nil, nil, fmt.Errorf("error running configuration script: %w", err) // Error is still returned, but logging is handled elsewhere
 	}
 
 	return vm, config, nil
@@ -32,26 +34,26 @@ func ExecuteExportedFunction(vm *goja.Runtime, module *goja.Object) {
 	if fn, ok := goja.AssertFunction(moduleExports); ok {
 		// CommonJS style: module.exports = function() { ... }
 		if err := executeFunctionWithErrorHandling(vm, fn); err != nil {
-			fmt.Printf("Error executing CommonJS export function: %v\n", err)
+			util.GetLogger().Error("Error executing CommonJS export function", zap.Error(err))
 		}
 	} else if defaultExport := moduleExports.ToObject(vm).Get("default"); defaultExport != nil {
 		if fn, ok := goja.AssertFunction(defaultExport); ok {
 			// ES6 style: export default function() { ... }
 			if err := executeFunctionWithErrorHandling(vm, fn); err != nil {
-				fmt.Printf("Error executing ES6 export function: %v\n", err)
+				util.GetLogger().Error("Error executing ES6 export function", zap.Error(err))
 			}
 		} else {
-			fmt.Println("Default export is not a function.")
+			util.GetLogger().Warn("Default export is not a function.")
 		}
 	} else {
-		fmt.Println("No executable export found.")
+		util.GetLogger().Warn("No executable export found.")
 	}
 }
 
 func executeFunctionWithErrorHandling(vm *goja.Runtime, fn goja.Callable) error {
 	_, err := fn(goja.Undefined(), vm.ToValue(nil))
 	if err != nil {
-		return fmt.Errorf("execution error: %w", err)
+		return fmt.Errorf("execution error: %w", err) // Error is still returned, but logging is handled elsewhere
 	}
 	return nil
 }
