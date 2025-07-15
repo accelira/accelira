@@ -10,6 +10,137 @@ import (
 
 const numShards = 16
 
+// WorkerMetrics is a per-worker (goroutine) struct for zero-contention metrics collection.
+type WorkerMetrics struct {
+	EndpointKey      string
+	TotalRequests    int
+	TotalBytesRecv   int
+	TotalBytesSent   int
+	TotalErrors      int
+	TotalCheckPassed int
+	TotalCheckFailed int
+	StatusCodeCounts [600]int
+	ResponseTimes    []float64 // for percentiles
+	// Add more fields as needed (e.g., handshake latencies)
+}
+
+// Reset clears the worker metrics for reuse.
+func (wm *WorkerMetrics) Reset() {
+	wm.TotalRequests = 0
+	wm.TotalBytesRecv = 0
+	wm.TotalBytesSent = 0
+	wm.TotalErrors = 0
+	wm.TotalCheckPassed = 0
+	wm.TotalCheckFailed = 0
+	for i := range wm.StatusCodeCounts {
+		wm.StatusCodeCounts[i] = 0
+	}
+	wm.ResponseTimes = wm.ResponseTimes[:0]
+}
+
+// ShardedMetricsAggregator holds global metrics, sharded for low lock contention.
+type ShardedMetricsAggregator struct {
+	Shards [numShards]struct {
+		Mutex  sync.Mutex
+		Global map[string]*metrics.EndpointMetricsAtomic // key: endpoint
+	}
+}
+
+// NewShardedMetricsAggregator initializes the aggregator.
+func NewShardedMetricsAggregator() *ShardedMetricsAggregator {
+	agg := &ShardedMetricsAggregator{}
+	for i := 0; i < numShards; i++ {
+		agg.Shards[i].Global = make(map[string]*metrics.EndpointMetricsAtomic)
+	}
+	return agg
+}
+
+// shardFor returns the shard index for a given endpoint key.
+func shardFor(key string) int {
+	h := 0
+	for i := 0; i < len(key); i++ {
+		h = 31*h + int(key[i])
+	}
+	return h % numShards
+}
+
+// Aggregate merges a worker's metrics into the global aggregator.
+func (agg *ShardedMetricsAggregator) Aggregate(wm *WorkerMetrics) {
+	idx := shardFor(wm.EndpointKey)
+	shard := &agg.Shards[idx]
+	shard.Mutex.Lock()
+	defer shard.Mutex.Unlock()
+
+	m, ok := shard.Global[wm.EndpointKey]
+	if !ok {
+		m = &metrics.EndpointMetricsAtomic{Type: metrics.HTTPRequest} // Use HTTP_REQUEST as default
+		shard.Global[wm.EndpointKey] = m
+	}
+	// Atomically aggregate counters
+	m.TotalRequests += int64(wm.TotalRequests)
+	m.TotalBytesReceived += int64(wm.TotalBytesRecv)
+	m.TotalBytesSent += int64(wm.TotalBytesSent)
+	m.TotalErrors += int64(wm.TotalErrors)
+	m.TotalCheckPassed += int64(wm.TotalCheckPassed)
+	m.TotalCheckFailed += int64(wm.TotalCheckFailed)
+	for i := 0; i < 600; i++ {
+		m.StatusCodeCounts[i] += int64(wm.StatusCodeCounts[i])
+	}
+	m.TotalResponseTime += int64(sumFloat64s(wm.ResponseTimes))
+	// Note: For percentiles, collect all response times from all workers and merge into t-digest at report time.
+}
+
+// sumFloat64s returns the sum of a slice of float64s.
+func sumFloat64s(a []float64) float64 {
+	sum := 0.0
+	for _, v := range a {
+		sum += v
+	}
+	return sum
+}
+
+// --- Example usage of the new optimized metrics flow ---
+
+// ExampleWorker simulates a worker collecting metrics and flushing to the aggregator.
+func ExampleWorker(agg *ShardedMetricsAggregator, endpoint string, results []float64) {
+	wm := &WorkerMetrics{EndpointKey: endpoint}
+	for _, respTime := range results {
+		wm.TotalRequests++
+		wm.StatusCodeCounts[200]++ // Example: all 200 OK
+		wm.ResponseTimes = append(wm.ResponseTimes, respTime)
+	}
+	agg.Aggregate(wm)
+}
+
+// ExampleReport generates a summary from the aggregator and computes percentiles using t-digest.
+func ExampleReport(agg *ShardedMetricsAggregator) {
+	// allRespTimes := make([]float64, 0, 1024)
+	for i := 0; i < numShards; i++ {
+		shard := &agg.Shards[i]
+		shard.Mutex.Lock()
+		for endpoint, m := range shard.Global {
+			println("Endpoint:", endpoint)
+			println("  TotalRequests:", m.TotalRequests)
+			println("  Status 200:", m.StatusCodeCounts[200])
+			// Collect for percentiles
+			// In real usage, you would merge per-worker response times here
+			// For demo, just print average
+			if m.TotalRequests > 0 {
+				avg := float64(m.TotalResponseTime) / float64(m.TotalRequests) / 1e6 // ms
+				println("  Avg Response Time (ms):", avg)
+			}
+		}
+		shard.Mutex.Unlock()
+	}
+	// To compute percentiles:
+	// 1. Collect all response times from all workers (or store globally)
+	// 2. Merge into t-digest
+	// td := tdigest.New()
+	// for _, t := range allRespTimes { td.Add(t, 1) }
+	// println("P95:", td.Quantile(0.95))
+}
+
+// --- Legacy logic below ---
 type MetricsShard struct {
 	Map   map[string]*metrics.EndpointMetricsAggregated
 	Mutex sync.RWMutex

@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/accelira/accelira/metrics"
+	"github.com/accelira/accelira/metricsprocessor"
 	"github.com/accelira/accelira/moduleloader"
-	"github.com/dop251/goja"
 	"github.com/accelira/accelira/util"
+	"github.com/dop251/goja"
 	"go.uber.org/zap"
 )
 
@@ -114,7 +115,7 @@ func (p *VMPool) Put(vm *goja.Runtime) {
 
 // }
 
-func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool) {
+func RunScriptWithPool(script string, wg *sync.WaitGroup, config *moduleloader.Config, vmPool *VMPool, agg *metricsprocessor.ShardedMetricsAggregator) {
 	defer wg.Done()
 
 	vm := vmPool.Get()
@@ -137,10 +138,15 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 		}
 	}
 
+	wm := &metricsprocessor.WorkerMetrics{EndpointKey: "GET https://example.com"} // TODO: set dynamically if needed
 	if iterations > 0 {
 		for i := 0; i < iterations; i++ {
 			start := time.Now()
 			ExecuteExportedFunction(vm, module)
+			respTime := time.Since(start).Seconds() * 1000 // ms, example
+			wm.TotalRequests++
+			wm.StatusCodeCounts[200]++ // TODO: get actual status code
+			wm.ResponseTimes = append(wm.ResponseTimes, respTime)
 			if workerRPS > 0 {
 				elapsed := time.Since(start)
 				sleep := time.Second/time.Duration(workerRPS) - elapsed
@@ -154,6 +160,10 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 		for time.Now().Before(endTime) {
 			start := time.Now()
 			ExecuteExportedFunction(vm, module)
+			respTime := time.Since(start).Seconds() * 1000 // ms, example
+			wm.TotalRequests++
+			wm.StatusCodeCounts[200]++ // TODO: get actual status code
+			wm.ResponseTimes = append(wm.ResponseTimes, respTime)
 			if workerRPS > 0 {
 				elapsed := time.Since(start)
 				sleep := time.Second/time.Duration(workerRPS) - elapsed
@@ -163,4 +173,6 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 			}
 		}
 	}
+	agg.Aggregate(wm)
+
 }

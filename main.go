@@ -236,9 +236,10 @@ func executeTestScripts(code string, config *moduleloader.Config, metricsChannel
 		}
 	}()
 
+	agg := metricsprocessor.NewShardedMetricsAggregator()
 	for i := 0; i < config.ConcurrentUsers; i++ {
 		waitGroup.Add(1)
-		go vmhandler.RunScriptWithPool(code, metricsChannel, &waitGroup, config, vmPool)
+		go vmhandler.RunScriptWithPool(code, &waitGroup, config, vmPool, agg)
 		if config.RampUpRate > 0 {
 			time.Sleep(time.Duration(1000/config.RampUpRate) * time.Millisecond)
 		}

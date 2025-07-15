@@ -3,6 +3,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/influxdata/tdigest"
@@ -100,6 +101,51 @@ type EndpointMetrics struct {
 	BytesSent           int
 	Errors              int
 }
+
+type EndpointMetricsAtomic struct {
+	// Atomic counters
+	TotalRequests      int64 // atomic
+	TotalBytesReceived int64 // atomic
+	TotalBytesSent     int64 // atomic
+	TotalErrors        int64 // atomic
+	TotalCheckPassed   int64 // atomic
+	TotalCheckFailed   int64 // atomic
+
+	// Status code counts: HTTP status codes 0–599
+	StatusCodeCounts [600]int64 // atomic increments
+
+	// Total response time in nanoseconds (for average calculation)
+	TotalResponseTime int64 // atomic
+
+	// Per-worker (goroutine) local slices for response times and handshake latencies
+	// These are not included here; see below for per-worker pattern.
+
+	Type MetricType
+}
+
+// AddRequest atomically increments the request count and status code count.
+func (m *EndpointMetricsAtomic) AddRequest(statusCode int, responseTime time.Duration, bytesReceived, bytesSent int, isError, checkPassed, checkFailed bool) {
+	atomic.AddInt64(&m.TotalRequests, 1)
+	if statusCode >= 0 && statusCode < 600 {
+		atomic.AddInt64(&m.StatusCodeCounts[statusCode], 1)
+	}
+	atomic.AddInt64(&m.TotalBytesReceived, int64(bytesReceived))
+	atomic.AddInt64(&m.TotalBytesSent, int64(bytesSent))
+	atomic.AddInt64(&m.TotalResponseTime, responseTime.Nanoseconds())
+	if isError {
+		atomic.AddInt64(&m.TotalErrors, 1)
+	}
+	if checkPassed {
+		atomic.AddInt64(&m.TotalCheckPassed, 1)
+	}
+	if checkFailed {
+		atomic.AddInt64(&m.TotalCheckFailed, 1)
+	}
+}
+
+// For latency percentiles, each worker should collect response times in a local slice:
+// var localResponseTimes []float64
+// At aggregation time, merge all slices into a global t-digest.
 
 type EndpointMetricsAggregated struct {
 	StatusCodeCounts           map[int]int
