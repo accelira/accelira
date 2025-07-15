@@ -16,7 +16,7 @@ type MetricsShard struct {
 }
 
 var (
-	metricsShards [numShards]MetricsShard
+	metricsShards   [numShards]MetricsShard
 	MetricsReceived int32
 )
 

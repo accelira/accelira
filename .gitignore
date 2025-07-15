@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+accelira
 
 # Test binary, built with `go test -c`
 *.test
