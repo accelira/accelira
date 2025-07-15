@@ -72,7 +72,7 @@ export default function () {
 Now, let it rip:
 
 ```bash
-./accelira run test.js
+./accelira run examples/es6.js --vus 100 --duration 30s --rps 10000
 
 ```
 

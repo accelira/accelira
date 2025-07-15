@@ -22,6 +22,7 @@ type Config struct {
 	RampUpRate      int
 	ConcurrentUsers int
 	Duration        time.Duration
+	RPS             int // Requests per second (optional)
 }
 
 func createConfigModule(config *Config) map[string]interface{} {

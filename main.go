@@ -62,12 +62,19 @@ func createRootCommand() *cobra.Command {
 }
 
 func createRunCommand() *cobra.Command {
-	return &cobra.Command{
+	runCmd := &cobra.Command{
 		Use:   "run [script]",
 		Short: "Run a JavaScript test script",
 		Args:  cobra.ExactArgs(1),
 		Run:   executeScript,
 	}
+
+	runCmd.Flags().IntP("vus", "u", 0, "Number of virtual users (concurrent users, overrides script config)")
+	runCmd.Flags().StringP("duration", "d", "", "Test duration (e.g., 30s, 1m, overrides script config)")
+	runCmd.Flags().IntP("rps", "r", 0, "Target requests per second (optional, overrides script config)")
+	runCmd.Flags().IntP("iterations", "i", 0, "Number of iterations per user (optional, overrides script config)")
+
+	return runCmd
 }
 
 func printMemoryUsage() {
@@ -115,6 +122,11 @@ func startMetricsCollection(metricsChannel chan metrics.Metrics) {
 }
 
 func executeScript(cmd *cobra.Command, args []string) {
+	// Parse CLI flag overrides
+	vus, _ := cmd.Flags().GetInt("vus")
+	durationStr, _ := cmd.Flags().GetString("duration")
+	rps, _ := cmd.Flags().GetInt("rps")
+	iterations, _ := cmd.Flags().GetInt("iterations")
 	util.DisplayLogo()
 
 	builtCode, err := buildJavaScriptCode(args[0])
@@ -122,6 +134,24 @@ func executeScript(cmd *cobra.Command, args []string) {
 
 	vmConfig, err := setupVM(builtCode)
 	checkError("Error setting up VM", err)
+
+	// Override config with CLI flags if set
+	if vus > 0 {
+		vmConfig.ConcurrentUsers = vus
+	}
+	if durationStr != "" {
+		dur, err := time.ParseDuration(durationStr)
+		if err == nil {
+			vmConfig.Duration = dur
+		}
+	}
+	if rps > 0 {
+		// We'll use this in the worker loop
+		vmConfig.RPS = rps
+	}
+	if iterations > 0 {
+		vmConfig.Iterations = iterations
+	}
 
 	displayConfig(vmConfig)
 
@@ -142,9 +172,13 @@ func executeScript(cmd *cobra.Command, args []string) {
 }
 
 func displayConfig(c *moduleloader.Config) {
-
-	fmt.Printf("Concurrent Users: %d\nRamp-up Rate: %d\nDuration: %s\n",
-		c.ConcurrentUsers, c.RampUpRate, c.Duration)
+	fmt.Printf("Concurrent Users: %d\nRamp-up Rate: %d\nDuration: %s\n", c.ConcurrentUsers, c.RampUpRate, c.Duration)
+	if c.RPS > 0 {
+		fmt.Printf("RPS: %d\n", c.RPS)
+	}
+	if c.Iterations > 0 {
+		fmt.Printf("Iterations per user: %d\n", c.Iterations)
+	}
 }
 
 func executeTestScripts(code string, config *moduleloader.Config, metricsChannel chan<- metrics.Metrics) {

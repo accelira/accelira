@@ -125,11 +125,40 @@ func RunScriptWithPool(script string, metricsChan chan<- metrics.Metrics, wg *sy
 		return
 	}
 
-	// Duration for which the script should run
-	duration := config.Duration
-	endTime := time.Now().Add(duration)
+	// Support both iterations and duration, with optional RPS throttle
+	iterations := config.Iterations
+	workerRPS := 0
+	if config.RPS > 0 && config.ConcurrentUsers > 0 {
+		workerRPS = config.RPS / config.ConcurrentUsers
+		if workerRPS == 0 {
+			workerRPS = 1 // At least 1 req/sec per worker
+		}
+	}
 
-	for time.Now().Before(endTime) {
-		ExecuteExportedFunction(vm, module)
+	if iterations > 0 {
+		for i := 0; i < iterations; i++ {
+			start := time.Now()
+			ExecuteExportedFunction(vm, module)
+			if workerRPS > 0 {
+				elapsed := time.Since(start)
+				sleep := time.Second/time.Duration(workerRPS) - elapsed
+				if sleep > 0 {
+					time.Sleep(sleep)
+				}
+			}
+		}
+	} else {
+		endTime := time.Now().Add(config.Duration)
+		for time.Now().Before(endTime) {
+			start := time.Now()
+			ExecuteExportedFunction(vm, module)
+			if workerRPS > 0 {
+				elapsed := time.Since(start)
+				sleep := time.Second/time.Duration(workerRPS) - elapsed
+				if sleep > 0 {
+					time.Sleep(sleep)
+				}
+			}
+		}
 	}
 }
